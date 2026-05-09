@@ -10,9 +10,13 @@
       register: kubeadm_join_command
       changed_when: false
 
-    - name: Show join command
+    - name: Store join command as fact
+      ansible.builtin.set_fact:
+        worker_join_command: "{{ kubeadm_join_command.stdout }} --cri-socket=unix:///run/containerd/containerd.sock"
+
+    - name: Show generated join command
       ansible.builtin.debug:
-        msg: "{{ kubeadm_join_command.stdout }}"
+        msg: "{{ worker_join_command }}"
 
 
 - name: Join worker nodes to Kubernetes cluster
@@ -27,9 +31,7 @@
       register: kubelet_conf
 
     - name: Join worker node to cluster
-      ansible.builtin.shell: >
-        {{ hostvars[groups['k8s_control_plane'][0]].kubeadm_join_command.stdout }}
-        --cri-socket=unix:///run/containerd/containerd.sock
+      ansible.builtin.shell: "{{ hostvars[groups['k8s_control_plane'][0]].worker_join_command }}"
       when: not kubelet_conf.stat.exists
       register: join_result
       changed_when: true
@@ -38,3 +40,8 @@
       ansible.builtin.debug:
         var: join_result.stdout_lines
       when: join_result is defined and join_result.stdout_lines is defined
+
+    - name: Worker already joined
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} is already part of the Kubernetes cluster."
+      when: kubelet_conf.stat.exists
