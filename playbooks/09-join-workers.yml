@@ -1,0 +1,40 @@
+---
+- name: Generate Kubernetes join command on control plane
+  hosts: k8s_control_plane
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Generate kubeadm join command
+      ansible.builtin.command: kubeadm token create --print-join-command
+      register: kubeadm_join_command
+      changed_when: false
+
+    - name: Show join command
+      ansible.builtin.debug:
+        msg: "{{ kubeadm_join_command.stdout }}"
+
+
+- name: Join worker nodes to Kubernetes cluster
+  hosts: k8s_workers
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check if worker already joined the cluster
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Join worker node to cluster
+      ansible.builtin.shell: >
+        {{ hostvars[groups['k8s_control_plane'][0]].kubeadm_join_command.stdout }}
+        --cri-socket=unix:///run/containerd/containerd.sock
+      when: not kubelet_conf.stat.exists
+      register: join_result
+      changed_when: true
+
+    - name: Show join result
+      ansible.builtin.debug:
+        var: join_result.stdout_lines
+      when: join_result is defined and join_result.stdout_lines is defined

@@ -25,12 +25,12 @@
 
     - name: Set hostname
       ansible.builtin.hostname:
-        name: "{{ server_hostname }}"
+        name: "{{ inventory_hostname }}"
 
     - name: Ensure /etc/hosts contains hostname
       ansible.builtin.lineinfile:
         path: /etc/hosts
-        line: "127.0.1.1 {{ server_hostname }}"
+        line: "127.0.1.1 {{ inventory_hostname }}"
         regexp: "^127\\.0\\.1\\.1"
         state: present
 
