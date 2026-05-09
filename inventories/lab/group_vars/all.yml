@@ -1,0 +1,22 @@
+---
+timezone: "Europe/Berlin"
+
+base_packages:
+  - curl
+  - wget
+  - git
+  - vim
+  - htop
+  - net-tools
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - apt-transport-https
+  - software-properties-common
+  - unzip
+  - jq
+
+server_hostname: "k8s-master-01"
+kubernetes_minor_version: "1.36"
+pod_network_cidr: "10.244.0.0/16"
+kubernetes_admin_user: "devops"

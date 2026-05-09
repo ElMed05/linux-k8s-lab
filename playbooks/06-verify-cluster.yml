@@ -1,0 +1,44 @@
+---
+- name: Verify Kubernetes cluster health
+  hosts: k8s_control_plane
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check containerd status
+      ansible.builtin.command: systemctl is-active containerd
+      register: containerd_status
+      changed_when: false
+
+    - name: Check kubelet status
+      ansible.builtin.command: systemctl is-active kubelet
+      register: kubelet_status
+      changed_when: false
+
+    - name: Get Kubernetes nodes
+      ansible.builtin.command: kubectl get nodes
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: kubectl_nodes
+      changed_when: false
+
+    - name: Get Kubernetes system pods
+      ansible.builtin.command: kubectl get pods -A
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: kubectl_pods
+      changed_when: false
+    
+    - name: Check Helm version
+      ansible.builtin.command: helm version --short
+      register: helm_version
+      changed_when: false
+
+    - name: Show verification result
+      ansible.builtin.debug:
+        msg:
+          - "containerd: {{ containerd_status.stdout }}"
+          - "kubelet: {{ kubelet_status.stdout }}"
+          - "helm: {{ helm_version.stdout }}"
+          - "{{ kubectl_nodes.stdout_lines }}"
+          - "{{ kubectl_pods.stdout_lines }}"

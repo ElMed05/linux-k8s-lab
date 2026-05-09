@@ -1,0 +1,35 @@
+---
+- name: Install Helm on Kubernetes control plane
+  hosts: k8s_control_plane
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Check if Helm is already installed
+      ansible.builtin.command: helm version --short
+      register: helm_check
+      changed_when: false
+      failed_when: false
+
+    - name: Download official Helm install script
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get_helm.sh
+        mode: "0755"
+      when: helm_check.rc != 0
+
+    - name: Install Helm
+      ansible.builtin.command: /tmp/get_helm.sh
+      when: helm_check.rc != 0
+      changed_when: true
+
+    - name: Verify Helm version
+      ansible.builtin.command: helm version --short
+      register: helm_version
+      changed_when: false
+
+    - name: Show Helm version
+      ansible.builtin.debug:
+        msg: "{{ helm_version.stdout }}"
+    
+    

@@ -1,0 +1,14 @@
+---
+- name: Bootstrap Ubuntu server for Ansible management
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Ensure Python 3 is installed
+      ansible.builtin.raw: test -e /usr/bin/python3 || (apt update && apt install -y python3)
+      changed_when: false
+
+    - name: Ensure sudo is installed
+      ansible.builtin.raw: test -e /usr/bin/sudo || (apt update && apt install -y sudo)
+      changed_when: false

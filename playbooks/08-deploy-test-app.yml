@@ -1,0 +1,61 @@
+---
+- name: Deploy test application with Helm
+  hosts: k8s_control_plane
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Add Bitnami Helm repository
+      ansible.builtin.command: helm repo add bitnami https://charts.bitnami.com/bitnami
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: helm_repo_add
+      changed_when: "'has been added' in helm_repo_add.stdout"
+      failed_when:
+        - helm_repo_add.rc != 0
+        - "'already exists' not in helm_repo_add.stderr"
+
+    - name: Update Helm repositories
+      ansible.builtin.command: helm repo update
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+
+    - name: Create demo namespace
+      ansible.builtin.command: kubectl create namespace demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: create_namespace
+      changed_when: "'created' in create_namespace.stdout"
+      failed_when:
+        - create_namespace.rc != 0
+        - "'AlreadyExists' not in create_namespace.stderr"
+
+    - name: Deploy nginx with Helm
+      ansible.builtin.command: >
+        helm upgrade --install demo-nginx bitnami/nginx
+        --namespace demo
+        --set service.type=NodePort
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
+
+    - name: Show demo pods
+      ansible.builtin.command: kubectl get pods -n demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: demo_pods
+      changed_when: false
+
+    - name: Show demo service
+      ansible.builtin.command: kubectl get svc -n demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: demo_service
+      changed_when: false
+
+    - name: Print demo status
+      ansible.builtin.debug:
+        msg:
+          - "{{ demo_pods.stdout_lines }}"
+          - "{{ demo_service.stdout_lines }}"
