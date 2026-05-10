@@ -21,6 +21,14 @@
         KUBECONFIG: /etc/kubernetes/admin.conf
       changed_when: false
 
+    - name: Get current ingress-nginx Helm release values
+      ansible.builtin.command: helm get values ingress-nginx -n ingress-nginx --all -o yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: ingress_nginx_current_values
+      changed_when: false
+      failed_when: false
+
     - name: Install or upgrade ingress-nginx
       ansible.builtin.command: >
         helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx
@@ -32,7 +40,11 @@
         --set controller.ingressClass=nginx
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
-      changed_when: true
+      register: ingress_nginx_helm_upgrade
+      changed_when: >
+        ingress_nginx_current_values.rc != 0 or
+        'type: NodePort' not in ingress_nginx_current_values.stdout or
+        'ingressClass: nginx' not in ingress_nginx_current_values.stdout
 
     - name: Wait for ingress-nginx controller rollout
       ansible.builtin.command: kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=180s
