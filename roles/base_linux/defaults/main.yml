@@ -1,0 +1,17 @@
+---
+base_linux_timezone: "Europe/Berlin"
+
+base_linux_packages:
+  - curl
+  - wget
+  - git
+  - vim
+  - htop
+  - net-tools
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - apt-transport-https
+  - software-properties-common
+  - unzip
+  - jq
