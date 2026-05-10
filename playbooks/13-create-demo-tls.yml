@@ -1,0 +1,127 @@
+---
+- name: Configure TLS for demo ingress with cert-manager
+  hosts: k8s_control_plane
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create self-signed ClusterIssuer manifest
+      ansible.builtin.copy:
+        dest: /tmp/demo-selfsigned-clusterissuer.yml
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: selfsigned-cluster-issuer
+          spec:
+            selfSigned: {}
+
+    - name: Apply self-signed ClusterIssuer
+      ansible.builtin.command: kubectl apply -f /tmp/demo-selfsigned-clusterissuer.yml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: apply_clusterissuer
+      changed_when: "'created' in apply_clusterissuer.stdout or 'configured' in apply_clusterissuer.stdout"
+
+    - name: Create Certificate manifest for demo.local
+      ansible.builtin.copy:
+        dest: /tmp/demo-certificate.yml
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          metadata:
+            name: demo-local-tls
+            namespace: demo
+          spec:
+            secretName: demo-local-tls
+            duration: 2160h
+            renewBefore: 360h
+            dnsNames:
+              - demo.local
+            issuerRef:
+              name: selfsigned-cluster-issuer
+              kind: ClusterIssuer
+
+    - name: Apply Certificate
+      ansible.builtin.command: kubectl apply -f /tmp/demo-certificate.yml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: apply_certificate
+      changed_when: "'created' in apply_certificate.stdout or 'configured' in apply_certificate.stdout"
+
+    - name: Wait for Certificate to become Ready
+      ansible.builtin.command: kubectl wait --for=condition=Ready certificate/demo-local-tls -n demo --timeout=120s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+
+    - name: Create TLS-enabled demo ingress manifest
+      ansible.builtin.copy:
+        dest: /tmp/demo-ingress-tls.yml
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: demo-nginx
+            namespace: demo
+          spec:
+            ingressClassName: nginx
+            tls:
+              - hosts:
+                  - demo.local
+                secretName: demo-local-tls
+            rules:
+              - host: demo.local
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: demo-nginx
+                          port:
+                            number: 80
+
+    - name: Apply TLS-enabled demo ingress
+      ansible.builtin.command: kubectl apply -f /tmp/demo-ingress-tls.yml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: apply_tls_ingress
+      changed_when: "'created' in apply_tls_ingress.stdout or 'configured' in apply_tls_ingress.stdout"
+
+    - name: Show Certificate status
+      ansible.builtin.command: kubectl get certificate -n demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: certificate_status
+      changed_when: false
+
+    - name: Show TLS secret
+      ansible.builtin.command: kubectl get secret demo-local-tls -n demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: tls_secret_status
+      changed_when: false
+
+    - name: Show demo ingress
+      ansible.builtin.command: kubectl get ingress demo-nginx -n demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: ingress_status
+      changed_when: false
+
+    - name: Print TLS status
+      ansible.builtin.debug:
+        msg:
+          - "{{ certificate_status.stdout_lines }}"
+          - "{{ tls_secret_status.stdout_lines }}"
+          - "{{ ingress_status.stdout_lines }}"

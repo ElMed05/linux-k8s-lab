@@ -1,0 +1,56 @@
+---
+- name: Install cert-manager
+  hosts: k8s_control_plane
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install or upgrade cert-manager with Helm
+      ansible.builtin.command: >
+        helm upgrade --install cert-manager
+        oci://quay.io/jetstack/charts/cert-manager
+        --version {{ cert_manager_version }}
+        --namespace cert-manager
+        --create-namespace
+        --set crds.enabled=true
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
+
+    - name: Wait for cert-manager deployment
+      ansible.builtin.command: kubectl rollout status deployment/cert-manager -n cert-manager --timeout=180s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+
+    - name: Wait for cert-manager cainjector deployment
+      ansible.builtin.command: kubectl rollout status deployment/cert-manager-cainjector -n cert-manager --timeout=180s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+
+    - name: Wait for cert-manager webhook deployment
+      ansible.builtin.command: kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=180s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+
+    - name: Show cert-manager pods
+      ansible.builtin.command: kubectl get pods -n cert-manager -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cert_manager_pods
+      changed_when: false
+
+    - name: Show cert-manager CRDs
+      ansible.builtin.command: kubectl get crd
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cluster_crds
+      changed_when: false
+
+    - name: Print cert-manager status
+      ansible.builtin.debug:
+        msg:
+          - "{{ cert_manager_pods.stdout_lines }}"
+          - "{{ cluster_crds.stdout_lines | select('search', 'cert-manager.io') | list }}"
