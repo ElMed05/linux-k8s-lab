@@ -31,14 +31,25 @@
         - create_namespace.rc != 0
         - "'AlreadyExists' not in create_namespace.stderr"
 
-    - name: Deploy nginx with Helm
+    - name: Get current demo-nginx Helm release values
+      ansible.builtin.command: helm get values demo-nginx -n demo --all -o yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: demo_nginx_current_values
+      changed_when: false
+      failed_when: false
+
+    - name: Deploy or upgrade nginx with Helm
       ansible.builtin.command: >
         helm upgrade --install demo-nginx bitnami/nginx
         --namespace demo
         --set service.type=ClusterIP
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
-      changed_when: true
+      register: demo_nginx_helm_upgrade
+      changed_when: >
+        demo_nginx_current_values.rc != 0 or
+        'type: ClusterIP' not in demo_nginx_current_values.stdout
 
     - name: Show demo pods
       ansible.builtin.command: kubectl get pods -n demo
