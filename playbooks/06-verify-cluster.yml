@@ -34,6 +34,27 @@
       register: helm_version
       changed_when: false
 
+    - name: Get ingress-nginx controller status
+      ansible.builtin.command: kubectl get pods -n ingress-nginx -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: ingress_controller_status
+      changed_when: false
+
+    - name: Get ingress-nginx service
+      ansible.builtin.command: kubectl get svc -n ingress-nginx
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: ingress_controller_service
+      changed_when: false
+
+    - name: Get demo ingress
+      ansible.builtin.command: kubectl get ingress -n demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: demo_ingress
+      changed_when: false
+
     - name: Show verification result
       ansible.builtin.debug:
         msg:
@@ -42,3 +63,6 @@
           - "helm: {{ helm_version.stdout }}"
           - "{{ kubectl_nodes.stdout_lines }}"
           - "{{ kubectl_pods.stdout_lines }}"
+          - "{{ ingress_controller_status.stdout_lines }}"
+          - "{{ ingress_controller_service.stdout_lines }}"
+          - "{{ demo_ingress.stdout_lines }}"

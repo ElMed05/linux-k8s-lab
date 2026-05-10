@@ -1,0 +1,50 @@
+---
+- name: Create ingress route for demo application
+  hosts: k8s_control_plane
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create demo ingress manifest
+      ansible.builtin.copy:
+        dest: /tmp/demo-ingress.yml
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: demo-nginx
+            namespace: demo
+          spec:
+            ingressClassName: nginx
+            rules:
+              - host: demo.local
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: demo-nginx
+                          port:
+                            number: 80
+
+    - name: Apply demo ingress manifest
+      ansible.builtin.command: kubectl apply -f /tmp/demo-ingress.yml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: apply_ingress
+      changed_when: "'created' in apply_ingress.stdout or 'configured' in apply_ingress.stdout"
+
+    - name: Show demo ingress
+      ansible.builtin.command: kubectl get ingress -n demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: demo_ingress
+      changed_when: false
+
+    - name: Print demo ingress status
+      ansible.builtin.debug:
+        msg: "{{ demo_ingress.stdout_lines }}"
