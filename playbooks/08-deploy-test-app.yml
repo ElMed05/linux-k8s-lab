@@ -35,7 +35,7 @@
       ansible.builtin.command: >
         helm upgrade --install demo-nginx bitnami/nginx
         --namespace demo
-        --set service.type=NodePort
+        --set service.type=ClusterIP
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       changed_when: true
