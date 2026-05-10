@@ -1,27 +1,5 @@
 ---
-- name: Generate Kubernetes join command on control plane
-  hosts: k8s_control_plane
-  become: true
-  gather_facts: false
-
-  tasks:
-    - name: Generate kubeadm join command
-      ansible.builtin.command: kubeadm token create --print-join-command
-      register: kubeadm_join_command
-      changed_when: false
-      no_log: true
-
-    - name: Store join command as fact
-      ansible.builtin.set_fact:
-        worker_join_command: "{{ kubeadm_join_command.stdout }} --cri-socket=unix:///run/containerd/containerd.sock"
-      no_log: true
-
-    - name: Confirm join command was generated
-      ansible.builtin.debug:
-        msg: "Kubernetes worker join command generated securely."
-
-
-- name: Join worker nodes to Kubernetes cluster
+- name: Check worker join status
   hosts: k8s_workers
   become: true
   gather_facts: false
@@ -32,9 +10,71 @@
         path: /etc/kubernetes/kubelet.conf
       register: kubelet_conf
 
+    - name: Mark worker as needing join
+      ansible.builtin.set_fact:
+        needs_kubernetes_join: true
+      when: not kubelet_conf.stat.exists
+
+    - name: Mark worker as already joined
+      ansible.builtin.set_fact:
+        needs_kubernetes_join: false
+      when: kubelet_conf.stat.exists
+
+    - name: Show worker join status
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} already joined: {{ kubelet_conf.stat.exists }}"
+
+
+- name: Generate Kubernetes join command only when needed
+  hosts: k8s_control_plane
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check if any worker needs to join
+      ansible.builtin.set_fact:
+        workers_need_join: >-
+          {{
+            groups['k8s_workers']
+            | map('extract', hostvars, 'needs_kubernetes_join')
+            | select('equalto', true)
+            | list
+            | length > 0
+          }}
+
+    - name: Generate kubeadm join command
+      ansible.builtin.command: kubeadm token create --print-join-command
+      register: kubeadm_join_command
+      changed_when: false
+      no_log: true
+      when: workers_need_join
+
+    - name: Store join command as fact
+      ansible.builtin.set_fact:
+        worker_join_command: "{{ kubeadm_join_command.stdout }} --cri-socket=unix:///run/containerd/containerd.sock"
+      no_log: true
+      when: workers_need_join
+
+    - name: Confirm join command was generated
+      ansible.builtin.debug:
+        msg: "Kubernetes worker join command generated securely."
+      when: workers_need_join
+
+    - name: Confirm no join command was needed
+      ansible.builtin.debug:
+        msg: "All worker nodes are already part of the Kubernetes cluster. No join token was created."
+      when: not workers_need_join
+
+
+- name: Join worker nodes to Kubernetes cluster
+  hosts: k8s_workers
+  become: true
+  gather_facts: false
+
+  tasks:
     - name: Join worker node to cluster
       ansible.builtin.shell: "{{ hostvars[groups['k8s_control_plane'][0]].worker_join_command }}"
-      when: not kubelet_conf.stat.exists
+      when: needs_kubernetes_join | default(false)
       register: join_result
       changed_when: true
       no_log: true
@@ -42,9 +82,9 @@
     - name: Worker joined successfully
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }} joined the Kubernetes cluster successfully."
-      when: not kubelet_conf.stat.exists
+      when: needs_kubernetes_join | default(false)
 
     - name: Worker already joined
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }} is already part of the Kubernetes cluster."
-      when: kubelet_conf.stat.exists
+      when: not (needs_kubernetes_join | default(false))
