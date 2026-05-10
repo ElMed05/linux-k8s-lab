@@ -35,6 +35,8 @@
     - name: Update apt cache after adding Kubernetes repository
       ansible.builtin.apt:
         update_cache: true
+        cache_valid_time: 3600
+      changed_when: false
 
     - name: Install kubelet, kubeadm and kubectl
       ansible.builtin.apt:
