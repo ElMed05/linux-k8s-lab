@@ -1,0 +1,11 @@
+---
+containerd_config_path: /etc/containerd/config.toml
+
+containerd_required_modules:
+  - overlay
+  - br_netfilter
+
+containerd_sysctl_settings:
+  net.bridge.bridge-nf-call-iptables: "1"
+  net.bridge.bridge-nf-call-ip6tables: "1"
+  net.ipv4.ip_forward: "1"
