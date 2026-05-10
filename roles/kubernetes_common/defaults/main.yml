@@ -1,0 +1,12 @@
+---
+kubernetes_minor_version: "1.36"
+
+kubernetes_apt_key_url: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_minor_version }}/deb/Release.key"
+kubernetes_apt_key_tmp_path: "/tmp/kubernetes-release.key"
+kubernetes_apt_keyring_path: "/etc/apt/keyrings/kubernetes-apt-keyring.gpg"
+kubernetes_apt_repository_file: "/etc/apt/sources.list.d/kubernetes.list"
+
+kubernetes_packages:
+  - kubelet
+  - kubeadm
+  - kubectl
