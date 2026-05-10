@@ -5,48 +5,28 @@
   gather_facts: false
 
   tasks:
-    - name: Create self-signed ClusterIssuer manifest
+    - name: Copy self-signed ClusterIssuer manifest
       ansible.builtin.copy:
-        dest: /tmp/demo-selfsigned-clusterissuer.yml
+        src: ../manifests/cert-manager/selfsigned-clusterissuer.yml
+        dest: /tmp/selfsigned-clusterissuer.yml
         owner: root
         group: root
         mode: "0644"
-        content: |
-          apiVersion: cert-manager.io/v1
-          kind: ClusterIssuer
-          metadata:
-            name: selfsigned-cluster-issuer
-          spec:
-            selfSigned: {}
 
     - name: Apply self-signed ClusterIssuer
-      ansible.builtin.command: kubectl apply -f /tmp/demo-selfsigned-clusterissuer.yml
+      ansible.builtin.command: kubectl apply -f /tmp/selfsigned-clusterissuer.yml
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       register: apply_clusterissuer
       changed_when: "'created' in apply_clusterissuer.stdout or 'configured' in apply_clusterissuer.stdout"
 
-    - name: Create Certificate manifest for demo.local
+    - name: Copy Certificate manifest
       ansible.builtin.copy:
+        src: ../manifests/cert-manager/demo-certificate.yml
         dest: /tmp/demo-certificate.yml
         owner: root
         group: root
         mode: "0644"
-        content: |
-          apiVersion: cert-manager.io/v1
-          kind: Certificate
-          metadata:
-            name: demo-local-tls
-            namespace: demo
-          spec:
-            secretName: demo-local-tls
-            duration: 2160h
-            renewBefore: 360h
-            dnsNames:
-              - demo.local
-            issuerRef:
-              name: selfsigned-cluster-issuer
-              kind: ClusterIssuer
 
     - name: Apply Certificate
       ansible.builtin.command: kubectl apply -f /tmp/demo-certificate.yml
@@ -61,38 +41,16 @@
         KUBECONFIG: /etc/kubernetes/admin.conf
       changed_when: false
 
-    - name: Create TLS-enabled demo ingress manifest
+    - name: Copy TLS-enabled demo ingress manifest
       ansible.builtin.copy:
-        dest: /tmp/demo-ingress-tls.yml
+        src: ../manifests/ingress/demo-ingress.yml
+        dest: /tmp/demo-ingress.yml
         owner: root
         group: root
         mode: "0644"
-        content: |
-          apiVersion: networking.k8s.io/v1
-          kind: Ingress
-          metadata:
-            name: demo-nginx
-            namespace: demo
-          spec:
-            ingressClassName: nginx
-            tls:
-              - hosts:
-                  - demo.local
-                secretName: demo-local-tls
-            rules:
-              - host: demo.local
-                http:
-                  paths:
-                    - path: /
-                      pathType: Prefix
-                      backend:
-                        service:
-                          name: demo-nginx
-                          port:
-                            number: 80
 
     - name: Apply TLS-enabled demo ingress
-      ansible.builtin.command: kubectl apply -f /tmp/demo-ingress-tls.yml
+      ansible.builtin.command: kubectl apply -f /tmp/demo-ingress.yml
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       register: apply_tls_ingress

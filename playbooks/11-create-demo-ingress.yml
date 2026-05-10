@@ -5,31 +5,13 @@
   gather_facts: false
 
   tasks:
-    - name: Create demo ingress manifest
+    - name: Copy demo ingress manifest to control plane
       ansible.builtin.copy:
+        src: ../manifests/ingress/demo-ingress.yml
         dest: /tmp/demo-ingress.yml
         owner: root
         group: root
         mode: "0644"
-        content: |
-          apiVersion: networking.k8s.io/v1
-          kind: Ingress
-          metadata:
-            name: demo-nginx
-            namespace: demo
-          spec:
-            ingressClassName: nginx
-            rules:
-              - host: demo.local
-                http:
-                  paths:
-                    - path: /
-                      pathType: Prefix
-                      backend:
-                        service:
-                          name: demo-nginx
-                          port:
-                            number: 80
 
     - name: Apply demo ingress manifest
       ansible.builtin.command: kubectl apply -f /tmp/demo-ingress.yml
