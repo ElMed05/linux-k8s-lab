@@ -54,18 +54,25 @@
         group: root
         mode: "0755"
 
+    - name: Check if containerd config exists
+      ansible.builtin.stat:
+        path: /etc/containerd/config.toml
+      register: containerd_config_file
+
     - name: Generate default containerd config
       ansible.builtin.command: containerd config default
       register: containerd_default_config
       changed_when: false
+      when: not containerd_config_file.stat.exists
 
-    - name: Write containerd config
+    - name: Write initial containerd config
       ansible.builtin.copy:
         dest: /etc/containerd/config.toml
         content: "{{ containerd_default_config.stdout }}"
         owner: root
         group: root
         mode: "0644"
+      when: not containerd_config_file.stat.exists
       notify: Restart containerd
 
     - name: Enable SystemdCgroup for containerd
