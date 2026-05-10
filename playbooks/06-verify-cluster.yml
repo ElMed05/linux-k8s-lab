@@ -54,6 +54,34 @@
         KUBECONFIG: /etc/kubernetes/admin.conf
       register: demo_ingress
       changed_when: false
+    
+    - name: Get cert-manager pods
+      ansible.builtin.command: kubectl get pods -n cert-manager -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cert_manager_pods
+      changed_when: false
+
+    - name: Get cert-manager certificate
+      ansible.builtin.command: kubectl get certificate -n demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: demo_certificate
+      changed_when: false
+
+    - name: Get demo TLS secret
+      ansible.builtin.command: kubectl get secret demo-local-tls -n demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: demo_tls_secret
+      changed_when: false
+
+    - name: Describe demo ingress TLS
+      ansible.builtin.command: kubectl describe ingress demo-nginx -n demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: demo_ingress_tls
+      changed_when: false
 
     - name: Show verification result
       ansible.builtin.debug:
@@ -66,3 +94,7 @@
           - "{{ ingress_controller_status.stdout_lines }}"
           - "{{ ingress_controller_service.stdout_lines }}"
           - "{{ demo_ingress.stdout_lines }}"
+          - "{{ cert_manager_pods.stdout_lines }}"
+          - "{{ demo_certificate.stdout_lines }}"
+          - "{{ demo_tls_secret.stdout_lines }}"
+          - "{{ demo_ingress_tls.stdout_lines | select('search', 'TLS|demo-local-tls|terminates|demo.local') | list }}"
