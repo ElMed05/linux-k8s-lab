@@ -1,0 +1,42 @@
+---
+- name: Test Ansible connectivity
+  ansible.builtin.import_playbook: 00-ping.yml
+
+- name: Bootstrap servers for Ansible
+  ansible.builtin.import_playbook: 01-bootstrap.yml
+
+- name: Configure base Linux settings
+  ansible.builtin.import_playbook: 02-base-linux.yml
+
+- name: Install container runtime
+  ansible.builtin.import_playbook: 03-container-runtime.yml
+
+- name: Install Kubernetes packages
+  ansible.builtin.import_playbook: 04-kubernetes-packages.yml
+
+- name: Initialize Kubernetes control plane
+  ansible.builtin.import_playbook: 05-init-control-plane.yml
+
+- name: Install Helm
+  ansible.builtin.import_playbook: 07-install-helm.yml
+
+- name: Join worker nodes
+  ansible.builtin.import_playbook: 09-join-workers.yml
+
+- name: Deploy demo application
+  ansible.builtin.import_playbook: 08-deploy-test-app.yml
+
+- name: Install ingress-nginx
+  ansible.builtin.import_playbook: 10-install-ingress-nginx.yml
+
+- name: Create demo ingress
+  ansible.builtin.import_playbook: 11-create-demo-ingress.yml
+
+- name: Install cert-manager
+  ansible.builtin.import_playbook: 12-install-cert-manager.yml
+
+- name: Create TLS for demo ingress
+  ansible.builtin.import_playbook: 13-create-demo-tls.yml
+
+- name: Verify Kubernetes cluster
+  ansible.builtin.import_playbook: 06-verify-cluster.yml
