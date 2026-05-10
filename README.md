@@ -1,0 +1,769 @@
+# Linux Kubernetes Lab mit Ansible, Helm, Ingress und TLS
+
+Dieses Projekt baut ein praxisnahes Kubernetes-Lab auf Basis von Ubuntu Server VMs in VMware Workstation auf.
+
+Ziel ist es, Kubernetes, Linux-Server-Administration, Ansible-Automatisierung und typische Plattform-Komponenten realistisch zu lernen — nicht nur mit Minikube, sondern mit echten Linux-Servern, kubeadm, containerd, Helm, Ingress und TLS.
+
+Das Lab besteht aktuell aus einem Multi-Node Kubernetes Cluster mit einem Control-Plane-Node und einem Worker-Node.
+
+---
+
+## Architekturübersicht
+
+```text
+Control-Rechner
+└── Ansible Projekt: linux-k8s-lab
+    ├── Inventory
+    ├── Playbooks
+    ├── Ansible Vault
+    └── SSH-Key Zugriff
+             │
+             │ verwaltet per SSH/Ansible
+             ▼
+VMware Workstation
+├── k8s-master-01
+│   ├── Ubuntu Server 24.04 LTS
+│   ├── Kubernetes Control Plane
+│   │   ├── kube-apiserver
+│   │   ├── kube-scheduler
+│   │   ├── kube-controller-manager
+│   │   └── etcd
+│   ├── kubelet
+│   ├── kube-proxy
+│   ├── containerd
+│   ├── Flannel CNI
+│   ├── kubectl
+│   └── Helm
+│
+└── k8s-worker-01
+    ├── Ubuntu Server 24.04 LTS
+    ├── kubelet
+    ├── kube-proxy
+    ├── containerd
+    └── Flannel CNI
+```
+
+---
+
+## App-Zugriffsarchitektur
+
+Die Demo-Anwendung läuft intern im Cluster als `ClusterIP` Service und wird über `ingress-nginx` veröffentlicht.
+
+```text
+Browser / curl
+→ demo.local:32685
+→ ingress-nginx-controller NodePort
+→ Ingress Rule für demo.local
+→ demo-nginx ClusterIP Service
+→ demo-nginx Pod
+```
+
+Aktuell gibt es zwei Zugriffspfade:
+
+```text
+HTTP:
+http://demo.local:30520
+
+HTTPS:
+https://demo.local:32685
+```
+
+Da aktuell ein Self-Signed-Zertifikat genutzt wird, zeigt der Browser bei HTTPS eine Zertifikatswarnung.
+
+---
+
+## Aktueller Stand
+
+- Ubuntu Server VMs in VMware Workstation
+- Multi-Node Kubernetes Cluster
+- Control Plane Node: `k8s-master-01`
+- Worker Node: `k8s-worker-01`
+- SSH-Key-basierter Zugriff
+- Ansible Inventory und Playbooks
+- Ansible Vault für sudo-Zugangsdaten
+- containerd als Container Runtime
+- Kubernetes v1.36 mit kubeadm
+- Flannel als CNI
+- Helm installiert
+- Demo-App `nginx` per Helm deployed
+- Demo-App Service als `ClusterIP`
+- ingress-nginx als Ingress Controller
+- Routing über `demo.local`
+- cert-manager installiert
+- Self-Signed TLS-Zertifikat für `demo.local`
+- HTTPS Zugriff über Ingress
+- Verify-Playbook zur Cluster-Prüfung
+- Worker-Join-Playbook ist idempotent
+- kubeadm Join Tokens werden nur erzeugt, wenn Worker noch nicht gejoint sind
+- Keine offenen kubeadm Join Tokens nach erfolgreichem Join nötig
+
+---
+
+## Serverübersicht
+
+| Hostname | Rolle | IP | Betriebssystem | Runtime |
+|---|---|---|---|---|
+| `k8s-master-01` | Control Plane | `192.168.0.202` | Ubuntu Server 24.04 LTS | containerd |
+| `k8s-worker-01` | Worker Node | `192.168.0.173` | Ubuntu Server 24.04 LTS | containerd |
+
+---
+
+## Kubernetes-Komponenten
+
+### Control Plane auf `k8s-master-01`
+
+```text
+kube-apiserver
+kube-scheduler
+kube-controller-manager
+etcd
+```
+
+### Node-Komponenten auf beiden Nodes
+
+```text
+kubelet
+kube-proxy
+containerd
+Flannel CNI
+```
+
+### Plattform-Komponenten
+
+```text
+Helm
+ingress-nginx
+cert-manager
+```
+
+---
+
+## Projektstruktur
+
+```text
+linux-k8s-lab/
+├── ansible.cfg
+├── README.md
+├── inventories/
+│   └── lab/
+│       ├── hosts.ini
+│       ├── group_vars/
+│       │   └── all.yml
+│       └── host_vars/
+│           ├── k8s-master-01/
+│           │   └── vault.yml
+│           └── k8s-worker-01/
+│               └── vault.yml
+├── playbooks/
+│   ├── 00-ping.yml
+│   ├── 01-bootstrap.yml
+│   ├── 02-base-linux.yml
+│   ├── 03-container-runtime.yml
+│   ├── 04-kubernetes-packages.yml
+│   ├── 05-init-control-plane.yml
+│   ├── 06-verify-cluster.yml
+│   ├── 07-install-helm.yml
+│   ├── 08-deploy-test-app.yml
+│   ├── 09-join-workers.yml
+│   ├── 10-install-ingress-nginx.yml
+│   ├── 11-create-demo-ingress.yml
+│   ├── 12-install-cert-manager.yml
+│   └── 13-create-demo-tls.yml
+└── docs/
+```
+
+---
+
+## Ansible Inventory
+
+Beispiel:
+
+```ini
+[k8s_control_plane]
+k8s-master-01 ansible_host=192.168.0.202 ansible_user=devops ansible_python_interpreter=/usr/bin/python3
+
+[k8s_workers]
+k8s-worker-01 ansible_host=192.168.0.173 ansible_user=devops ansible_python_interpreter=/usr/bin/python3
+
+[k8s_cluster:children]
+k8s_control_plane
+k8s_workers
+```
+
+---
+
+## Ansible Vault
+
+Sudo-Passwörter werden nicht im Klartext im Repository gespeichert, sondern über Ansible Vault verschlüsselt.
+
+Beispielstruktur:
+
+```text
+inventories/lab/host_vars/k8s-master-01/vault.yml
+inventories/lab/host_vars/k8s-worker-01/vault.yml
+```
+
+Beispielinhalt vor Verschlüsselung:
+
+```yaml
+---
+ansible_become_password: "SUDO_PASSWORD"
+```
+
+Ausführen mit Vault:
+
+```bash
+ansible-playbook playbooks/06-verify-cluster.yml --ask-vault-pass
+```
+
+---
+
+## Playbook-Reihenfolge
+
+### 1. Verbindung testen
+
+```bash
+ansible-playbook playbooks/00-ping.yml
+```
+
+### 2. Server für Ansible vorbereiten
+
+```bash
+ansible-playbook playbooks/01-bootstrap.yml --ask-vault-pass
+```
+
+### 3. Linux-Basiskonfiguration
+
+```bash
+ansible-playbook playbooks/02-base-linux.yml --ask-vault-pass
+```
+
+Dieses Playbook setzt unter anderem:
+
+```text
+Basis-Pakete
+Timezone
+Hostname
+/etc/hosts
+Swap deaktivieren
+```
+
+### 4. Container Runtime installieren
+
+```bash
+ansible-playbook playbooks/03-container-runtime.yml --ask-vault-pass
+```
+
+Dieses Playbook installiert und konfiguriert:
+
+```text
+containerd
+overlay Kernel-Modul
+br_netfilter Kernel-Modul
+sysctl Settings für Kubernetes Networking
+SystemdCgroup für containerd
+```
+
+### 5. Kubernetes-Pakete installieren
+
+```bash
+ansible-playbook playbooks/04-kubernetes-packages.yml --ask-vault-pass
+```
+
+Installiert:
+
+```text
+kubeadm
+kubelet
+kubectl
+```
+
+### 6. Control Plane initialisieren
+
+```bash
+ansible-playbook playbooks/05-init-control-plane.yml --ask-vault-pass
+```
+
+Dieses Playbook führt `kubeadm init` aus, richtet die kubeconfig ein und installiert Flannel als CNI.
+
+### 7. Helm installieren
+
+```bash
+ansible-playbook playbooks/07-install-helm.yml --ask-vault-pass
+```
+
+### 8. Worker Nodes joinen
+
+```bash
+ansible-playbook playbooks/09-join-workers.yml --ask-vault-pass
+```
+
+Das Join-Playbook ist idempotent:
+
+- Es prüft zuerst, ob Worker bereits gejoint sind.
+- Es erzeugt nur dann einen kubeadm Join Token, wenn ein Worker noch nicht Teil des Clusters ist.
+- Der Join Token wird nicht im Terminal ausgegeben.
+- Bereits gejointe Worker werden übersprungen.
+
+### 9. Demo-App deployen
+
+```bash
+ansible-playbook playbooks/08-deploy-test-app.yml --ask-vault-pass
+```
+
+Die Demo-App wird per Helm installiert:
+
+```text
+Namespace: demo
+Release: demo-nginx
+Service Type: ClusterIP
+```
+
+Die App ist bewusst nicht direkt per NodePort veröffentlicht, sondern wird über Ingress erreichbar gemacht.
+
+### 10. ingress-nginx installieren
+
+```bash
+ansible-playbook playbooks/10-install-ingress-nginx.yml --ask-vault-pass
+```
+
+Installiert den Ingress Controller per Helm:
+
+```text
+Namespace: ingress-nginx
+IngressClass: nginx
+Service Type: NodePort
+HTTP NodePort: 30520
+HTTPS NodePort: 32685
+```
+
+### 11. Demo-Ingress erstellen
+
+```bash
+ansible-playbook playbooks/11-create-demo-ingress.yml --ask-vault-pass
+```
+
+Erstellt eine Ingress Resource für:
+
+```text
+Host: demo.local
+Service: demo-nginx
+Port: 80
+```
+
+### 12. cert-manager installieren
+
+```bash
+ansible-playbook playbooks/12-install-cert-manager.yml --ask-vault-pass
+```
+
+Installiert:
+
+```text
+cert-manager
+cert-manager-cainjector
+cert-manager-webhook
+cert-manager CRDs
+```
+
+### 13. TLS für Demo-Ingress erstellen
+
+```bash
+ansible-playbook playbooks/13-create-demo-tls.yml --ask-vault-pass
+```
+
+Erstellt:
+
+```text
+SelfSigned ClusterIssuer
+Certificate für demo.local
+TLS Secret demo-local-tls
+Ingress TLS Binding
+```
+
+### 14. Cluster prüfen
+
+```bash
+ansible-playbook playbooks/06-verify-cluster.yml --ask-vault-pass
+```
+
+---
+
+## Verify-Checks
+
+Das Verify-Playbook prüft aktuell:
+
+```text
+containerd Status
+kubelet Status
+Helm Version
+Kubernetes Nodes
+System Pods
+ingress-nginx Controller
+ingress-nginx Service
+Demo Ingress
+cert-manager Pods
+Certificate Status
+TLS Secret
+TLS Binding im Ingress
+```
+
+Erwarteter Zustand:
+
+```text
+k8s-master-01   Ready
+k8s-worker-01   Ready
+demo-nginx      Running
+ingress-nginx   Running
+cert-manager    Running
+demo-local-tls  Ready=True
+```
+
+---
+
+## Zugriff auf die Demo-App
+
+### HTTP über Ingress
+
+```bash
+curl -H "Host: demo.local" http://192.168.0.202:30520
+```
+
+Alternativ über den Worker:
+
+```bash
+curl -H "Host: demo.local" http://192.168.0.173:30520
+```
+
+### HTTPS über Ingress
+
+Wenn `demo.local` in der lokalen hosts-Datei gesetzt ist:
+
+```bash
+curl -k https://demo.local:32685
+```
+
+Alternativ ohne hosts-Datei:
+
+```bash
+curl -k --resolve demo.local:32685:192.168.0.202 https://demo.local:32685
+```
+
+---
+
+## Windows hosts-Datei
+
+Für den Browser-Test unter Windows muss `demo.local` lokal auf einen Kubernetes Node zeigen.
+
+Datei als Administrator öffnen:
+
+```text
+C:\Windows\System32\drivers\etc\hosts
+```
+
+Eintrag:
+
+```text
+192.168.0.202 demo.local
+```
+
+Danach im Browser:
+
+```text
+http://demo.local:30520
+https://demo.local:32685
+```
+
+Bei HTTPS erscheint wegen des Self-Signed-Zertifikats eine Zertifikatswarnung.
+
+---
+
+## Wichtige Kubernetes-Konzepte in diesem Lab
+
+### Deployment
+
+Das Deployment verwaltet die gewünschte Anzahl an Pods.
+
+Beispiel:
+
+```text
+demo-nginx Deployment
+→ erzeugt ReplicaSet
+→ erzeugt Pod
+```
+
+### ReplicaSet
+
+Das ReplicaSet sorgt dafür, dass die gewünschte Anzahl an Pods läuft.
+
+### Pod
+
+Der Pod ist die kleinste ausführbare Einheit in Kubernetes.
+
+In diesem Lab läuft darin ein nginx Container.
+
+### Service
+
+Ein Service stellt eine stabile Adresse für Pods bereit.
+
+Die Demo-App nutzt:
+
+```text
+ClusterIP
+```
+
+Dadurch ist sie nur intern im Cluster erreichbar.
+
+### NodePort
+
+NodePort wird aktuell nur für den Ingress Controller genutzt.
+
+Dadurch kann Traffic von außen in den Cluster gelangen.
+
+### Ingress
+
+Ingress definiert HTTP/HTTPS-Routing-Regeln.
+
+Beispiel:
+
+```text
+demo.local
+→ demo-nginx Service
+```
+
+### Ingress Controller
+
+Der ingress-nginx Controller setzt die Ingress-Regeln technisch um.
+
+Ohne Ingress Controller hätte eine Ingress Resource keine Wirkung.
+
+### IngressClass
+
+Die IngressClass verbindet eine Ingress Resource mit einem konkreten Controller.
+
+In diesem Lab:
+
+```text
+ingressClassName: nginx
+```
+
+### cert-manager
+
+cert-manager erstellt und verwaltet Kubernetes-Zertifikate automatisch.
+
+In diesem Lab erstellt cert-manager ein Self-Signed-Zertifikat für `demo.local`.
+
+### Certificate
+
+Das Certificate beschreibt das gewünschte Zertifikat.
+
+```text
+Certificate: demo-local-tls
+DNS Name: demo.local
+Secret: demo-local-tls
+```
+
+### TLS Secret
+
+Das TLS Secret enthält Zertifikat und Private Key.
+
+```text
+Secret: demo-local-tls
+Type: kubernetes.io/tls
+```
+
+Der Ingress nutzt dieses Secret für HTTPS.
+
+---
+
+## Typischer Traffic Flow
+
+### HTTP
+
+```text
+Client
+→ demo.local:30520
+→ ingress-nginx-controller
+→ Ingress Rule
+→ demo-nginx ClusterIP Service
+→ demo-nginx Pod
+```
+
+### HTTPS
+
+```text
+Client
+→ demo.local:32685
+→ ingress-nginx-controller
+→ TLS termination mit demo-local-tls
+→ Ingress Rule
+→ demo-nginx ClusterIP Service
+→ demo-nginx Pod
+```
+
+Intern im Cluster geht der Traffic aktuell per HTTP weiter.
+
+---
+
+## Nützliche kubectl-Befehle
+
+### Nodes prüfen
+
+```bash
+kubectl get nodes -o wide
+```
+
+### Alle Pods prüfen
+
+```bash
+kubectl get pods -A -o wide
+```
+
+### Demo-App prüfen
+
+```bash
+kubectl get all -n demo
+```
+
+### Ingress prüfen
+
+```bash
+kubectl get ingress -n demo
+kubectl describe ingress demo-nginx -n demo
+```
+
+### Ingress Controller prüfen
+
+```bash
+kubectl get pods -n ingress-nginx -o wide
+kubectl get svc -n ingress-nginx
+kubectl get ingressclass
+```
+
+### cert-manager prüfen
+
+```bash
+kubectl get pods -n cert-manager -o wide
+kubectl get certificate -n demo
+kubectl describe certificate demo-local-tls -n demo
+kubectl get secret demo-local-tls -n demo
+```
+
+### kubeadm Tokens prüfen
+
+```bash
+sudo kubeadm token list
+```
+
+---
+
+## Sicherheitsnotizen
+
+- SSH-Zugriff läuft per SSH-Key.
+- sudo-Passwörter werden mit Ansible Vault verwaltet.
+- kubeadm Join Tokens werden nicht dauerhaft benötigt.
+- Das Join-Playbook erzeugt nur dann neue Tokens, wenn Worker noch nicht gejoint sind.
+- Join Tokens werden nicht im Ansible Output angezeigt.
+- Das aktuelle TLS-Zertifikat ist Self-Signed und nur für das lokale Lab gedacht.
+- Für produktionsähnliche Umgebungen wären eine interne CA, ACME oder Let’s Encrypt sinnvoll.
+
+---
+
+## Aktueller Lernstand
+
+Mit diesem Lab wurden bisher folgende Themen praktisch umgesetzt:
+
+```text
+Linux Server Setup
+SSH-Key Zugriff
+Ansible Automation
+Ansible Vault
+containerd
+kubeadm
+kubelet
+kubectl
+Kubernetes Control Plane
+Worker Node Join
+Flannel CNI
+Helm
+Deployment
+ReplicaSet
+Pod
+Service
+ClusterIP
+NodePort
+Ingress
+IngressClass
+ingress-nginx
+cert-manager
+Certificate
+TLS Secret
+HTTPS Ingress
+Cluster Verification
+```
+
+---
+
+## Nächste Lernschritte
+
+### Kurzfristig
+
+```text
+README und Architektur weiter pflegen
+Playbooks idempotenter machen
+Manifeste aus /tmp in templates/ oder files/ auslagern
+Verify-Playbook weiter verbessern
+```
+
+### Kubernetes Networking
+
+```text
+Ingress besser verstehen
+TLS sauberer mit lokaler CA umsetzen
+cert-manager Issuer/ClusterIssuer vertiefen
+Network Policies lernen
+```
+
+### Moderne Kubernetes APIs
+
+```text
+Gateway API kennenlernen
+HTTPRoute
+GatewayClass
+Gateway
+Vergleich Ingress vs Gateway API
+```
+
+### Plattform-Erweiterungen
+
+```text
+Prometheus und Grafana
+Loki Logging
+OpenTelemetry Collector
+Argo CD GitOps
+Container Registry Integration
+CI/CD Pipeline für App-Deployments
+RBAC
+Secrets Management
+Backup/Restore mit Velero
+```
+
+---
+
+## Projektziel
+
+Das Ziel dieses Labs ist es, eine realistische Kubernetes-Lernumgebung aufzubauen, die typische DevOps- und Platform-Engineering-Themen abdeckt.
+
+Der Fokus liegt nicht nur auf Installation, sondern auf einem nachvollziehbaren Betriebsmodell:
+
+```text
+Server automatisiert vorbereiten
+Cluster reproduzierbar aufbauen
+Worker Nodes verwalten
+Workloads deployen
+Ingress und TLS betreiben
+Cluster-Zustand verifizieren
+Änderungen versionieren
+```
+
+Dieses Projekt eignet sich als Grundlage für weitere Themen wie GitOps, Observability, CI/CD, Security und Gateway API.
