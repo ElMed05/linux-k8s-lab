@@ -5,6 +5,14 @@
   gather_facts: false
 
   tasks:
+    - name: Get current cert-manager Helm release status
+      ansible.builtin.command: helm list -n cert-manager --filter '^cert-manager$' -o yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cert_manager_helm_status
+      changed_when: false
+      failed_when: false
+
     - name: Install or upgrade cert-manager with Helm
       ansible.builtin.command: >
         helm upgrade --install cert-manager
@@ -15,7 +23,11 @@
         --set crds.enabled=true
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
-      changed_when: true
+      register: cert_manager_helm_upgrade
+      changed_when: >
+        cert_manager_helm_status.rc != 0 or
+        'cert-manager' not in cert_manager_helm_status.stdout or
+        cert_manager_version not in cert_manager_helm_status.stdout
 
     - name: Wait for cert-manager deployment
       ansible.builtin.command: kubectl rollout status deployment/cert-manager -n cert-manager --timeout=180s
