@@ -1,0 +1,17 @@
+---
+- name: Join worker node to Kubernetes cluster
+  ansible.builtin.shell: "{{ worker_join_command }}"
+  when: needs_kubernetes_join | default(false)
+  register: join_result
+  changed_when: true
+  no_log: true
+
+- name: Worker joined successfully
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} joined the Kubernetes cluster successfully."
+  when: needs_kubernetes_join | default(false)
+
+- name: Worker already joined
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} is already part of the Kubernetes cluster."
+  when: not (needs_kubernetes_join | default(false))

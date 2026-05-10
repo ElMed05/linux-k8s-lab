@@ -1,0 +1,19 @@
+---
+- name: Check if worker already joined the cluster
+  ansible.builtin.stat:
+    path: "{{ kubelet_config_path }}"
+  register: kubelet_conf
+
+- name: Mark worker as needing join
+  ansible.builtin.set_fact:
+    needs_kubernetes_join: true
+  when: not kubelet_conf.stat.exists
+
+- name: Mark worker as already joined
+  ansible.builtin.set_fact:
+    needs_kubernetes_join: false
+  when: kubelet_conf.stat.exists
+
+- name: Show worker join status
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} already joined: {{ kubelet_conf.stat.exists }}"

@@ -1,0 +1,3 @@
+---
+- name: Include worker join status check
+  ansible.builtin.include_tasks: check_status.yml

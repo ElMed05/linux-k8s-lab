@@ -5,24 +5,10 @@
   gather_facts: false
 
   tasks:
-    - name: Check if worker already joined the cluster
-      ansible.builtin.stat:
-        path: /etc/kubernetes/kubelet.conf
-      register: kubelet_conf
-
-    - name: Mark worker as needing join
-      ansible.builtin.set_fact:
-        needs_kubernetes_join: true
-      when: not kubelet_conf.stat.exists
-
-    - name: Mark worker as already joined
-      ansible.builtin.set_fact:
-        needs_kubernetes_join: false
-      when: kubelet_conf.stat.exists
-
-    - name: Show worker join status
-      ansible.builtin.debug:
-        msg: "{{ inventory_hostname }} already joined: {{ kubelet_conf.stat.exists }}"
+    - name: Check Kubernetes worker status
+      ansible.builtin.include_role:
+        name: kubernetes_worker
+        tasks_from: check_status
 
 
 - name: Generate Kubernetes join command only when needed
@@ -51,7 +37,7 @@
 
     - name: Store join command as fact
       ansible.builtin.set_fact:
-        worker_join_command: "{{ kubeadm_join_command.stdout }} --cri-socket=unix:///run/containerd/containerd.sock"
+        worker_join_command: "{{ kubeadm_join_command.stdout }} --cri-socket={{ containerd_cri_socket }}"
       no_log: true
       when: workers_need_join
 
@@ -72,19 +58,9 @@
   gather_facts: false
 
   tasks:
-    - name: Join worker node to cluster
-      ansible.builtin.shell: "{{ hostvars[groups['k8s_control_plane'][0]].worker_join_command }}"
-      when: needs_kubernetes_join | default(false)
-      register: join_result
-      changed_when: true
-      no_log: true
-
-    - name: Worker joined successfully
-      ansible.builtin.debug:
-        msg: "{{ inventory_hostname }} joined the Kubernetes cluster successfully."
-      when: needs_kubernetes_join | default(false)
-
-    - name: Worker already joined
-      ansible.builtin.debug:
-        msg: "{{ inventory_hostname }} is already part of the Kubernetes cluster."
-      when: not (needs_kubernetes_join | default(false))
+    - name: Join Kubernetes worker nodes
+      ansible.builtin.include_role:
+        name: kubernetes_worker
+        tasks_from: join
+      vars:
+        worker_join_command: "{{ hostvars[groups['k8s_control_plane'][0]].worker_join_command | default('') }}"

@@ -1,0 +1,3 @@
+---
+containerd_cri_socket: "unix:///run/containerd/containerd.sock"
+kubelet_config_path: "/etc/kubernetes/kubelet.conf"
