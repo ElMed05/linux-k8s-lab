@@ -9,14 +9,16 @@
       ansible.builtin.command: kubeadm token create --print-join-command
       register: kubeadm_join_command
       changed_when: false
+      no_log: true
 
     - name: Store join command as fact
       ansible.builtin.set_fact:
         worker_join_command: "{{ kubeadm_join_command.stdout }} --cri-socket=unix:///run/containerd/containerd.sock"
+      no_log: true
 
-    - name: Show generated join command
+    - name: Confirm join command was generated
       ansible.builtin.debug:
-        msg: "{{ worker_join_command }}"
+        msg: "Kubernetes worker join command generated securely."
 
 
 - name: Join worker nodes to Kubernetes cluster
@@ -35,11 +37,12 @@
       when: not kubelet_conf.stat.exists
       register: join_result
       changed_when: true
+      no_log: true
 
-    - name: Show join result
+    - name: Worker joined successfully
       ansible.builtin.debug:
-        var: join_result.stdout_lines
-      when: join_result is defined and join_result.stdout_lines is defined
+        msg: "{{ inventory_hostname }} joined the Kubernetes cluster successfully."
+      when: not kubelet_conf.stat.exists
 
     - name: Worker already joined
       ansible.builtin.debug:
