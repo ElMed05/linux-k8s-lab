@@ -1,0 +1,89 @@
+---
+- name: Copy self-signed ClusterIssuer manifest
+  ansible.builtin.copy:
+    src: "{{ demo_tls_clusterissuer_manifest_src }}"
+    dest: "{{ demo_tls_clusterissuer_manifest_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply self-signed ClusterIssuer
+  ansible.builtin.command: kubectl apply -f {{ demo_tls_clusterissuer_manifest_dest }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_clusterissuer
+  changed_when: "'created' in apply_clusterissuer.stdout or 'configured' in apply_clusterissuer.stdout"
+
+- name: Copy Certificate manifest
+  ansible.builtin.copy:
+    src: "{{ demo_tls_certificate_manifest_src }}"
+    dest: "{{ demo_tls_certificate_manifest_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply Certificate
+  ansible.builtin.command: kubectl apply -f {{ demo_tls_certificate_manifest_dest }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_certificate
+  changed_when: "'created' in apply_certificate.stdout or 'configured' in apply_certificate.stdout"
+
+- name: Wait for Certificate to become Ready
+  ansible.builtin.command: >
+    kubectl wait --for=condition=Ready
+    certificate/{{ demo_tls_certificate_name }}
+    -n {{ demo_tls_namespace }}
+    --timeout=120s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Copy TLS-enabled demo ingress manifest
+  ansible.builtin.copy:
+    src: "{{ demo_tls_ingress_manifest_src }}"
+    dest: "{{ demo_tls_ingress_manifest_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply TLS-enabled demo ingress
+  ansible.builtin.command: kubectl apply -f {{ demo_tls_ingress_manifest_dest }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_tls_ingress
+  changed_when: "'created' in apply_tls_ingress.stdout or 'configured' in apply_tls_ingress.stdout"
+
+- name: Show Certificate status
+  ansible.builtin.command: >
+    kubectl get certificate {{ demo_tls_certificate_name }}
+    -n {{ demo_tls_namespace }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: certificate_status
+  changed_when: false
+
+- name: Show TLS secret
+  ansible.builtin.command: >
+    kubectl get secret {{ demo_tls_secret_name }}
+    -n {{ demo_tls_namespace }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: tls_secret_status
+  changed_when: false
+
+- name: Show demo ingress
+  ansible.builtin.command: >
+    kubectl get ingress {{ demo_tls_ingress_name }}
+    -n {{ demo_tls_namespace }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: ingress_status
+  changed_when: false
+
+- name: Print TLS status
+  ansible.builtin.debug:
+    msg:
+      - "{{ certificate_status.stdout_lines }}"
+      - "{{ tls_secret_status.stdout_lines }}"
+      - "{{ ingress_status.stdout_lines }}"

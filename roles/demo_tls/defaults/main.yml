@@ -1,0 +1,13 @@
+---
+demo_tls_namespace: "demo"
+demo_tls_certificate_name: "demo-local-tls"
+demo_tls_secret_name: "demo-local-tls"
+demo_tls_ingress_name: "demo-nginx"
+
+demo_tls_clusterissuer_manifest_src: "../manifests/cert-manager/selfsigned-clusterissuer.yml"
+demo_tls_certificate_manifest_src: "../manifests/cert-manager/demo-certificate.yml"
+demo_tls_ingress_manifest_src: "../manifests/ingress/demo-ingress.yml"
+
+demo_tls_clusterissuer_manifest_dest: "/tmp/selfsigned-clusterissuer.yml"
+demo_tls_certificate_manifest_dest: "/tmp/demo-certificate.yml"
+demo_tls_ingress_manifest_dest: "/tmp/demo-ingress.yml"
