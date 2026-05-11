@@ -1,0 +1,8 @@
+---
+demo_app_namespace: "demo"
+demo_app_release_name: "demo-nginx"
+demo_app_chart: "bitnami/nginx"
+demo_app_service_type: "ClusterIP"
+
+bitnami_helm_repo_name: "bitnami"
+bitnami_helm_repo_url: "https://charts.bitnami.com/bitnami"
