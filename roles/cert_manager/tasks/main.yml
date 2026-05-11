@@ -1,0 +1,74 @@
+---
+- name: Get current cert-manager Helm release status
+  ansible.builtin.command: >
+    helm list -n {{ cert_manager_namespace }}
+    --filter '^{{ cert_manager_release_name }}$'
+    -o yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: cert_manager_helm_status
+  changed_when: false
+  failed_when: false
+
+- name: Install or upgrade cert-manager with Helm
+  ansible.builtin.command: >
+    helm upgrade --install {{ cert_manager_release_name }}
+    {{ cert_manager_chart }}
+    --version {{ cert_manager_version }}
+    --namespace {{ cert_manager_namespace }}
+    --create-namespace
+    --set crds.enabled={{ cert_manager_crds_enabled | lower }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: cert_manager_helm_upgrade
+  changed_when: >
+    cert_manager_helm_status.rc != 0 or
+    cert_manager_release_name not in cert_manager_helm_status.stdout or
+    cert_manager_version not in cert_manager_helm_status.stdout
+
+- name: Wait for cert-manager deployment
+  ansible.builtin.command: >
+    kubectl rollout status deployment/cert-manager
+    -n {{ cert_manager_namespace }}
+    --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Wait for cert-manager cainjector deployment
+  ansible.builtin.command: >
+    kubectl rollout status deployment/cert-manager-cainjector
+    -n {{ cert_manager_namespace }}
+    --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Wait for cert-manager webhook deployment
+  ansible.builtin.command: >
+    kubectl rollout status deployment/cert-manager-webhook
+    -n {{ cert_manager_namespace }}
+    --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Show cert-manager pods
+  ansible.builtin.command: kubectl get pods -n {{ cert_manager_namespace }} -o wide
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: cert_manager_pods
+  changed_when: false
+
+- name: Show cert-manager CRDs
+  ansible.builtin.command: kubectl get crd
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: cluster_crds
+  changed_when: false
+
+- name: Print cert-manager status
+  ansible.builtin.debug:
+    msg:
+      - "{{ cert_manager_pods.stdout_lines }}"
+      - "{{ cluster_crds.stdout_lines | select('search', 'cert-manager.io') | list }}"
