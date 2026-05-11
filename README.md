@@ -15,7 +15,9 @@ Control-Rechner
 └── Ansible Projekt: linux-k8s-lab
     ├── Inventory
     ├── Playbooks
+    ├── Ansible Rollen
     ├── Ansible Vault
+    ├── versionierte Kubernetes-Manifeste
     └── SSH-Key Zugriff
              │
              │ verwaltet per SSH/Ansible
@@ -81,6 +83,10 @@ Da aktuell ein Self-Signed-Zertifikat genutzt wird, zeigt der Browser bei HTTPS 
 - SSH-Key-basierter Zugriff
 - Ansible Inventory und Playbooks
 - Ansible Vault für sudo-Zugangsdaten
+- Zentrales `site.yml` Playbook für den kompletten Lab-Aufbau
+- Ansible-Rollenstruktur für wiederverwendbare Automatisierung
+- Idempotente Playbooks: erneuter Lauf endet mit `changed=0`
+- Kubernetes-Manifeste versioniert im Repository unter `manifests/`
 - containerd als Container Runtime
 - Kubernetes v1.36 mit kubeadm
 - Flannel als CNI
@@ -154,7 +160,14 @@ linux-k8s-lab/
 │           │   └── vault.yml
 │           └── k8s-worker-01/
 │               └── vault.yml
+├── manifests/
+│   ├── cert-manager/
+│   │   ├── demo-certificate.yml
+│   │   └── selfsigned-clusterissuer.yml
+│   └── ingress/
+│       └── demo-ingress.yml
 ├── playbooks/
+│   ├── site.yml
 │   ├── 00-ping.yml
 │   ├── 01-bootstrap.yml
 │   ├── 02-base-linux.yml
@@ -169,8 +182,69 @@ linux-k8s-lab/
 │   ├── 11-create-demo-ingress.yml
 │   ├── 12-install-cert-manager.yml
 │   └── 13-create-demo-tls.yml
+├── roles/
+│   ├── base_linux/
+│   ├── cert_manager/
+│   ├── containerd/
+│   ├── demo_app/
+│   ├── demo_ingress/
+│   ├── demo_tls/
+│   ├── helm/
+│   ├── ingress_nginx/
+│   ├── kubernetes_common/
+│   ├── kubernetes_control_plane/
+│   └── kubernetes_worker/
 └── docs/
 ```
+
+---
+
+## Rollenstruktur
+
+Die Automatisierung ist in wiederverwendbare Ansible-Rollen aufgeteilt.
+
+```text
+roles/
+├── base_linux/
+│   └── Linux-Basiskonfiguration, Pakete, Hostname, Timezone, Swap
+├── containerd/
+│   └── containerd Runtime, Kernel-Module, sysctl, Cgroup-Konfiguration
+├── kubernetes_common/
+│   └── Kubernetes Repository, kubeadm, kubelet, kubectl, Package Hold
+├── kubernetes_control_plane/
+│   └── kubeadm init, kubeconfig, Flannel CNI, Control-Plane-Konfiguration
+├── kubernetes_worker/
+│   └── Worker-Join-Status, sicherer kubeadm Join, Token-Vermeidung
+├── helm/
+│   └── Helm Installation und Versionsprüfung
+├── demo_app/
+│   └── Demo-App Deployment per Helm als ClusterIP Service
+├── ingress_nginx/
+│   └── ingress-nginx Installation per Helm als NodePort Controller
+├── cert_manager/
+│   └── cert-manager Installation per Helm inklusive CRDs
+├── demo_ingress/
+│   └── Demo Ingress Resource für demo.local
+└── demo_tls/
+    └── SelfSigned ClusterIssuer, Certificate und TLS Binding
+```
+
+Die Playbooks bleiben als klare Einstiegspunkte erhalten, rufen aber größtenteils nur noch die jeweiligen Rollen auf.
+
+Beispiel:
+
+```yaml
+---
+- name: Configure base Linux settings
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - base_linux
+```
+
+Dadurch bleibt die Automatisierung wartbarer, wiederverwendbarer und näher an einer professionellen Ansible-Struktur.
 
 ---
 
@@ -220,6 +294,24 @@ ansible-playbook playbooks/06-verify-cluster.yml --ask-vault-pass
 
 ## Playbook-Reihenfolge
 
+Der komplette Lab-Aufbau kann über ein zentrales Playbook ausgeführt werden:
+
+```bash
+ansible-playbook playbooks/site.yml --ask-vault-pass
+```
+
+Dieses Playbook ruft die einzelnen Schritte in der richtigen Reihenfolge auf.
+
+Ein erneuter Lauf sollte im Zielzustand ohne Änderungen enden:
+
+```text
+changed=0
+failed=0
+unreachable=0
+```
+
+Alternativ können die einzelnen Playbooks weiterhin separat ausgeführt werden.
+
 ### 1. Verbindung testen
 
 ```bash
@@ -238,7 +330,7 @@ ansible-playbook playbooks/01-bootstrap.yml --ask-vault-pass
 ansible-playbook playbooks/02-base-linux.yml --ask-vault-pass
 ```
 
-Dieses Playbook setzt unter anderem:
+Dieses Playbook ruft die Rolle `base_linux` auf und setzt unter anderem:
 
 ```text
 Basis-Pakete
@@ -254,7 +346,7 @@ Swap deaktivieren
 ansible-playbook playbooks/03-container-runtime.yml --ask-vault-pass
 ```
 
-Dieses Playbook installiert und konfiguriert:
+Dieses Playbook ruft die Rolle `containerd` auf und installiert bzw. konfiguriert:
 
 ```text
 containerd
@@ -270,7 +362,7 @@ SystemdCgroup für containerd
 ansible-playbook playbooks/04-kubernetes-packages.yml --ask-vault-pass
 ```
 
-Installiert:
+Dieses Playbook ruft die Rolle `kubernetes_common` auf und installiert:
 
 ```text
 kubeadm
@@ -284,7 +376,7 @@ kubectl
 ansible-playbook playbooks/05-init-control-plane.yml --ask-vault-pass
 ```
 
-Dieses Playbook führt `kubeadm init` aus, richtet die kubeconfig ein und installiert Flannel als CNI.
+Dieses Playbook ruft die Rolle `kubernetes_control_plane` auf, führt `kubeadm init` aus, richtet die kubeconfig ein und installiert Flannel als CNI.
 
 ### 7. Helm installieren
 
@@ -292,13 +384,15 @@ Dieses Playbook führt `kubeadm init` aus, richtet die kubeconfig ein und instal
 ansible-playbook playbooks/07-install-helm.yml --ask-vault-pass
 ```
 
+Dieses Playbook ruft die Rolle `helm` auf.
+
 ### 8. Worker Nodes joinen
 
 ```bash
 ansible-playbook playbooks/09-join-workers.yml --ask-vault-pass
 ```
 
-Das Join-Playbook ist idempotent:
+Das Join-Playbook nutzt die Rolle `kubernetes_worker` und ist idempotent:
 
 - Es prüft zuerst, ob Worker bereits gejoint sind.
 - Es erzeugt nur dann einen kubeadm Join Token, wenn ein Worker noch nicht Teil des Clusters ist.
@@ -310,6 +404,8 @@ Das Join-Playbook ist idempotent:
 ```bash
 ansible-playbook playbooks/08-deploy-test-app.yml --ask-vault-pass
 ```
+
+Dieses Playbook ruft die Rolle `demo_app` auf.
 
 Die Demo-App wird per Helm installiert:
 
@@ -327,6 +423,8 @@ Die App ist bewusst nicht direkt per NodePort veröffentlicht, sondern wird übe
 ansible-playbook playbooks/10-install-ingress-nginx.yml --ask-vault-pass
 ```
 
+Dieses Playbook ruft die Rolle `ingress_nginx` auf.
+
 Installiert den Ingress Controller per Helm:
 
 ```text
@@ -343,12 +441,15 @@ HTTPS NodePort: 32685
 ansible-playbook playbooks/11-create-demo-ingress.yml --ask-vault-pass
 ```
 
+Dieses Playbook ruft die Rolle `demo_ingress` auf.
+
 Erstellt eine Ingress Resource für:
 
 ```text
 Host: demo.local
 Service: demo-nginx
 Port: 80
+TLS Secret: demo-local-tls
 ```
 
 ### 12. cert-manager installieren
@@ -356,6 +457,8 @@ Port: 80
 ```bash
 ansible-playbook playbooks/12-install-cert-manager.yml --ask-vault-pass
 ```
+
+Dieses Playbook ruft die Rolle `cert_manager` auf.
 
 Installiert:
 
@@ -371,6 +474,8 @@ cert-manager CRDs
 ```bash
 ansible-playbook playbooks/13-create-demo-tls.yml --ask-vault-pass
 ```
+
+Dieses Playbook ruft die Rolle `demo_tls` auf.
 
 Erstellt:
 
@@ -418,6 +523,29 @@ ingress-nginx   Running
 cert-manager    Running
 demo-local-tls  Ready=True
 ```
+
+---
+
+## Idempotenz
+
+Ein wichtiger Fokus dieses Labs ist Idempotenz.
+
+Das bedeutet: Wenn der gewünschte Zustand bereits vorhanden ist, verändert Ansible nichts mehr.
+
+Der zentrale Test dafür ist:
+
+```bash
+ansible-playbook playbooks/site.yml --ask-vault-pass
+```
+
+Erwarteter Zustand bei erneutem Lauf:
+
+```text
+k8s-master-01   changed=0   failed=0   unreachable=0
+k8s-worker-01   changed=0   failed=0   unreachable=0
+```
+
+Damit ist das Lab nicht nur manuell aufgebaut, sondern reproduzierbar und kontrolliert automatisiert.
 
 ---
 
@@ -678,6 +806,8 @@ Linux Server Setup
 SSH-Key Zugriff
 Ansible Automation
 Ansible Vault
+Ansible Rollenstruktur
+Idempotente Playbooks
 containerd
 kubeadm
 kubelet
@@ -710,8 +840,9 @@ Cluster Verification
 
 ```text
 README und Architektur weiter pflegen
-Playbooks idempotenter machen
-Manifeste aus /tmp in templates/ oder files/ auslagern
+Rollenstruktur weiter verfeinern
+Helm Values aus Playbooks in values-Dateien auslagern
+Manifeste perspektivisch für GitOps vorbereiten
 Verify-Playbook weiter verbessern
 ```
 
