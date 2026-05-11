@@ -83,6 +83,41 @@
       register: demo_ingress_tls
       changed_when: false
 
+    - name: Get NGINX Gateway Fabric pods
+      ansible.builtin.command: kubectl get pods -n nginx-gateway -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: gateway_pods
+      changed_when: false
+
+    - name: Get NGINX Gateway Fabric services
+      ansible.builtin.command: kubectl get svc -n nginx-gateway
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: gateway_services
+      changed_when: false
+
+    - name: Get GatewayClass status
+      ansible.builtin.command: kubectl get gatewayclass
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: gatewayclass_status
+      changed_when: false
+
+    - name: Get Gateway status
+      ansible.builtin.command: kubectl get gateway -A
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: gateway_status
+      changed_when: false
+
+    - name: Get HTTPRoute status
+      ansible.builtin.command: kubectl get httproute -n demo
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: httproute_status
+      changed_when: false
+
     - name: Show verification result
       ansible.builtin.debug:
         msg:
@@ -98,3 +133,8 @@
           - "{{ demo_certificate.stdout_lines }}"
           - "{{ demo_tls_secret.stdout_lines }}"
           - "{{ demo_ingress_tls.stdout_lines | select('search', 'TLS|demo-local-tls|terminates|demo.local') | list }}"
+          - "{{ gateway_pods.stdout_lines }}"
+          - "{{ gateway_services.stdout_lines }}"
+          - "{{ gatewayclass_status.stdout_lines }}"
+          - "{{ gateway_status.stdout_lines }}"
+          - "{{ httproute_status.stdout_lines }}"
