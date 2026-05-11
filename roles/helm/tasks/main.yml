@@ -1,0 +1,27 @@
+---
+- name: Check if Helm is already installed
+  ansible.builtin.command: helm version --short
+  register: helm_check
+  changed_when: false
+  failed_when: false
+
+- name: Download official Helm install script
+  ansible.builtin.get_url:
+    url: "{{ helm_install_script_url }}"
+    dest: "{{ helm_install_script_path }}"
+    mode: "0755"
+  when: helm_check.rc != 0
+
+- name: Install Helm
+  ansible.builtin.command: "{{ helm_install_script_path }}"
+  when: helm_check.rc != 0
+  changed_when: true
+
+- name: Verify Helm version
+  ansible.builtin.command: helm version --short
+  register: helm_version
+  changed_when: false
+
+- name: Show Helm version
+  ansible.builtin.debug:
+    msg: "{{ helm_version.stdout }}"
