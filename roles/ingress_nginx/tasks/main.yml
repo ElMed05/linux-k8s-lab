@@ -1,0 +1,72 @@
+---
+- name: Add ingress-nginx Helm repository
+  ansible.builtin.command: >
+    helm repo add {{ ingress_nginx_repo_name }} {{ ingress_nginx_repo_url }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: ingress_repo_add
+  changed_when: "'has been added' in ingress_repo_add.stdout"
+  failed_when:
+    - ingress_repo_add.rc != 0
+    - "'already exists' not in ingress_repo_add.stderr"
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Get current ingress-nginx Helm release values
+  ansible.builtin.command: >
+    helm get values {{ ingress_nginx_release_name }} -n {{ ingress_nginx_namespace }} --all -o yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: ingress_nginx_current_values
+  changed_when: false
+  failed_when: false
+
+- name: Install or upgrade ingress-nginx
+  ansible.builtin.command: >
+    helm upgrade --install {{ ingress_nginx_release_name }} {{ ingress_nginx_chart }}
+    --namespace {{ ingress_nginx_namespace }}
+    --create-namespace
+    --set controller.service.type={{ ingress_nginx_service_type }}
+    --set controller.ingressClassResource.name={{ ingress_nginx_class_name }}
+    --set controller.ingressClassResource.enabled=true
+    --set controller.ingressClass={{ ingress_nginx_class_name }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: ingress_nginx_helm_upgrade
+  changed_when: >
+    ingress_nginx_current_values.rc != 0 or
+    ('type: ' ~ ingress_nginx_service_type) not in ingress_nginx_current_values.stdout or
+    ('ingressClass: ' ~ ingress_nginx_class_name) not in ingress_nginx_current_values.stdout
+
+- name: Wait for ingress-nginx controller rollout
+  ansible.builtin.command: >
+    kubectl rollout status deployment/ingress-nginx-controller
+    -n {{ ingress_nginx_namespace }}
+    --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Show ingress-nginx pods
+  ansible.builtin.command: kubectl get pods -n {{ ingress_nginx_namespace }} -o wide
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: ingress_pods
+  changed_when: false
+
+- name: Show ingress-nginx service
+  ansible.builtin.command: kubectl get svc -n {{ ingress_nginx_namespace }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: ingress_svc
+  changed_when: false
+
+- name: Print ingress-nginx status
+  ansible.builtin.debug:
+    msg:
+      - "{{ ingress_pods.stdout_lines }}"
+      - "{{ ingress_svc.stdout_lines }}"
