@@ -4,29 +4,5 @@
   become: true
   gather_facts: false
 
-  tasks:
-    - name: Copy demo ingress manifest to control plane
-      ansible.builtin.copy:
-        src: ../manifests/ingress/demo-ingress.yml
-        dest: /tmp/demo-ingress.yml
-        owner: root
-        group: root
-        mode: "0644"
-
-    - name: Apply demo ingress manifest
-      ansible.builtin.command: kubectl apply -f /tmp/demo-ingress.yml
-      environment:
-        KUBECONFIG: /etc/kubernetes/admin.conf
-      register: apply_ingress
-      changed_when: "'created' in apply_ingress.stdout or 'configured' in apply_ingress.stdout"
-
-    - name: Show demo ingress
-      ansible.builtin.command: kubectl get ingress -n demo
-      environment:
-        KUBECONFIG: /etc/kubernetes/admin.conf
-      register: demo_ingress
-      changed_when: false
-
-    - name: Print demo ingress status
-      ansible.builtin.debug:
-        msg: "{{ demo_ingress.stdout_lines }}"
+  roles:
+    - demo_ingress

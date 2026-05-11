@@ -1,0 +1,26 @@
+---
+- name: Copy demo ingress manifest to control plane
+  ansible.builtin.copy:
+    src: "{{ demo_ingress_manifest_src }}"
+    dest: "{{ demo_ingress_manifest_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply demo ingress manifest
+  ansible.builtin.command: kubectl apply -f {{ demo_ingress_manifest_dest }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_ingress
+  changed_when: "'created' in apply_ingress.stdout or 'configured' in apply_ingress.stdout"
+
+- name: Show demo ingress
+  ansible.builtin.command: kubectl get ingress {{ demo_ingress_name }} -n {{ demo_ingress_namespace }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: demo_ingress
+  changed_when: false
+
+- name: Print demo ingress status
+  ansible.builtin.debug:
+    msg: "{{ demo_ingress.stdout_lines }}"

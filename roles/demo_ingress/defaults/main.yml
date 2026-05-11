@@ -1,0 +1,5 @@
+---
+demo_ingress_namespace: "demo"
+demo_ingress_name: "demo-nginx"
+demo_ingress_manifest_src: "../manifests/ingress/demo-ingress.yml"
+demo_ingress_manifest_dest: "/tmp/demo-ingress.yml"
