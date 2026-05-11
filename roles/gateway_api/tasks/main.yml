@@ -1,0 +1,131 @@
+---
+- name: Install Gateway API CRDs
+  ansible.builtin.command: >
+    kubectl apply --server-side -f
+    https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.0/standard-install.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: gateway_api_crds_apply
+  changed_when: >
+    'created' in gateway_api_crds_apply.stdout or
+    'configured' in gateway_api_crds_apply.stdout
+
+- name: Get current NGINX Gateway Fabric Helm release status
+  ansible.builtin.command: >
+    helm list -n {{ gateway_api_ngf_namespace }}
+    --filter '^{{ gateway_api_ngf_release_name }}$'
+    -o yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: ngf_helm_status
+  changed_when: false
+  failed_when: false
+
+- name: Install or upgrade NGINX Gateway Fabric
+  ansible.builtin.command: >
+    helm upgrade --install {{ gateway_api_ngf_release_name }}
+    {{ gateway_api_ngf_chart }}
+    --namespace {{ gateway_api_ngf_namespace }}
+    --create-namespace
+    --version {{ gateway_api_ngf_version | regex_replace('^v', '') }}
+    --set nginx.service.type=NodePort
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: ngf_helm_upgrade
+  changed_when: >
+    ngf_helm_status.rc != 0 or
+    gateway_api_ngf_release_name not in ngf_helm_status.stdout or
+    (gateway_api_ngf_version | regex_replace('^v', '')) not in ngf_helm_status.stdout
+
+- name: Wait for NGINX Gateway Fabric deployment
+  ansible.builtin.command: >
+    kubectl wait --timeout=300s
+    -n {{ gateway_api_ngf_namespace }}
+    deployment/{{ gateway_api_ngf_release_name }}-nginx-gateway-fabric
+    --for=condition=Available
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Check GatewayClass created by NGINX Gateway Fabric
+  ansible.builtin.command: kubectl get gatewayclass {{ gateway_api_gatewayclass_name }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: gatewayclass_status
+  changed_when: false
+
+- name: Copy Gateway manifest
+  ansible.builtin.copy:
+    src: ../manifests/gateway-api/gateway.yml
+    dest: /tmp/gateway.yml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Check Gateway manifest diff
+  ansible.builtin.command: kubectl diff -f /tmp/gateway.yml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: gateway_diff
+  changed_when: false
+  failed_when: gateway_diff.rc not in [0, 1]
+
+- name: Apply Gateway manifest
+  ansible.builtin.command: kubectl apply -f /tmp/gateway.yml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: gateway_apply
+  changed_when: gateway_diff.rc == 1
+  when: gateway_diff.rc == 1
+
+- name: Copy HTTPRoute manifest
+  ansible.builtin.copy:
+    src: ../manifests/gateway-api/httproute.yml
+    dest: /tmp/httproute.yml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Check HTTPRoute manifest diff
+  ansible.builtin.command: kubectl diff -f /tmp/httproute.yml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: httproute_diff
+  changed_when: false
+  failed_when: httproute_diff.rc not in [0, 1]
+
+- name: Apply HTTPRoute manifest
+  ansible.builtin.command: kubectl apply -f /tmp/httproute.yml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: httproute_apply
+  changed_when: httproute_diff.rc == 1
+  when: httproute_diff.rc == 1
+
+- name: Show Gateway API resources
+  ansible.builtin.command: kubectl get gatewayclass,gateway -A
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: gateway_api_resources
+  changed_when: false
+
+- name: Show HTTPRoute
+  ansible.builtin.command: kubectl get httproute -n {{ gateway_api_route_namespace }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: httproute_status
+  changed_when: false
+
+- name: Show NGINX Gateway Fabric services
+  ansible.builtin.command: kubectl get svc -n {{ gateway_api_ngf_namespace }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: ngf_services
+  changed_when: false
+
+- name: Print Gateway API status
+  ansible.builtin.debug:
+    msg:
+      - "{{ gateway_api_resources.stdout_lines }}"
+      - "{{ httproute_status.stdout_lines }}"
+      - "{{ ngf_services.stdout_lines }}"

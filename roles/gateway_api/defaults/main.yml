@@ -1,0 +1,14 @@
+---
+gateway_api_ngf_version: "v2.6.0"
+gateway_api_ngf_release_name: "ngf"
+gateway_api_ngf_namespace: "nginx-gateway"
+gateway_api_ngf_chart: "oci://ghcr.io/nginx/charts/nginx-gateway-fabric"
+
+gateway_api_gatewayclass_name: "nginx"
+gateway_api_gateway_name: "demo-gateway"
+gateway_api_gateway_namespace: "nginx-gateway"
+gateway_api_route_namespace: "demo"
+gateway_api_route_name: "demo-nginx-route"
+gateway_api_hostname: "gateway.demo.local"
+gateway_api_backend_service: "demo-nginx"
+gateway_api_backend_port: "80"

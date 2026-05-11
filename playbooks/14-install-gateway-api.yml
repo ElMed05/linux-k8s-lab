@@ -1,0 +1,8 @@
+---
+- name: Install and configure Gateway API with NGINX Gateway Fabric
+  hosts: k8s_control_plane
+  become: true
+  gather_facts: false
+
+  roles:
+    - gateway_api

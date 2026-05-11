@@ -40,3 +40,6 @@
 
 - name: Verify Kubernetes cluster
   ansible.builtin.import_playbook: 06-verify-cluster.yml
+
+- name: Install and configure Gateway API
+  ansible.builtin.import_playbook: 14-install-gateway-api.yml
