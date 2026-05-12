@@ -1,8 +1,8 @@
-# Linux Kubernetes Lab mit Ansible, Helm, Ingress und TLS
+# Linux Kubernetes Lab mit Ansible, Helm, Ingress, TLS und Gateway API
 
 Dieses Projekt baut ein praxisnahes Kubernetes-Lab auf Basis von Ubuntu Server VMs in VMware Workstation auf.
 
-Ziel ist es, Kubernetes, Linux-Server-Administration, Ansible-Automatisierung und typische Plattform-Komponenten realistisch zu lernen — nicht nur mit Minikube, sondern mit echten Linux-Servern, kubeadm, containerd, Helm, Ingress und TLS.
+Ziel ist es, Kubernetes, Linux-Server-Administration, Ansible-Automatisierung und typische Plattform-Komponenten realistisch zu lernen — nicht nur mit Minikube, sondern mit echten Linux-Servern, kubeadm, containerd, Helm, Ingress, TLS und Gateway API.
 
 Das Lab besteht aktuell aus einem Multi-Node Kubernetes Cluster mit einem Control-Plane-Node und einem Worker-Node.
 
@@ -49,7 +49,14 @@ VMware Workstation
 
 ## App-Zugriffsarchitektur
 
-Die Demo-Anwendung läuft intern im Cluster als `ClusterIP` Service und wird über `ingress-nginx` veröffentlicht.
+Die Demo-Anwendung läuft intern im Cluster als `ClusterIP` Service. Sie wird über zwei unterschiedliche Kubernetes-Networking-Modelle veröffentlicht:
+
+```text
+1. Klassisch über ingress-nginx und Ingress
+2. Modern über Gateway API mit NGINX Gateway Fabric
+```
+
+### Zugriff über Ingress
 
 ```text
 Browser / curl
@@ -60,7 +67,7 @@ Browser / curl
 → demo-nginx Pod
 ```
 
-Aktuell gibt es zwei Zugriffspfade:
+Aktuelle Ingress-Zugriffspfade:
 
 ```text
 HTTP:
@@ -68,9 +75,43 @@ http://demo.local:30520
 
 HTTPS:
 https://demo.local:32685
+http://gateway.demo.local:31977
 ```
 
 Da aktuell ein Self-Signed-Zertifikat genutzt wird, zeigt der Browser bei HTTPS eine Zertifikatswarnung.
+
+### Zugriff über Gateway API
+
+Zusätzlich ist die Demo-Anwendung über Gateway API erreichbar.
+
+```text
+Browser / curl
+→ gateway.demo.local:31977
+→ demo-gateway-nginx NodePort
+→ Gateway demo-gateway
+→ HTTPRoute demo-nginx-route
+→ demo-nginx ClusterIP Service
+→ demo-nginx Pod
+```
+
+Aktueller Gateway-API-Zugriff:
+
+```text
+HTTP:
+http://gateway.demo.local:31977
+```
+
+Wichtig: Der Gateway-Service nutzt aktuell `externalTrafficPolicy: Local`. Deshalb funktioniert der NodePort-Zugriff über den Worker-Node, auf dem der Gateway-Pod läuft:
+
+```text
+k8s-worker-01 / 192.168.0.173
+```
+
+Test:
+
+```bash
+curl -H "Host: gateway.demo.local" http://192.168.0.173:31977
+```
 
 ---
 
@@ -98,10 +139,17 @@ Da aktuell ein Self-Signed-Zertifikat genutzt wird, zeigt der Browser bei HTTPS 
 - cert-manager installiert
 - Self-Signed TLS-Zertifikat für `demo.local`
 - HTTPS Zugriff über Ingress
+- Gateway API CRDs installiert
+- NGINX Gateway Fabric als Gateway API Controller installiert
+- GatewayClass `nginx` vorhanden und accepted
+- Gateway `demo-gateway` programmiert und aktiv
+- HTTPRoute `demo-nginx-route` für `gateway.demo.local`
+- Demo-App zusätzlich über Gateway API erreichbar
 - Verify-Playbook zur Cluster-Prüfung
 - Worker-Join-Playbook ist idempotent
 - kubeadm Join Tokens werden nur erzeugt, wenn Worker noch nicht gejoint sind
 - Keine offenen kubeadm Join Tokens nach erfolgreichem Join nötig
+- `site.yml` läuft idempotent mit `changed=0`
 
 ---
 
@@ -140,6 +188,8 @@ Flannel CNI
 Helm
 ingress-nginx
 cert-manager
+Gateway API
+NGINX Gateway Fabric
 ```
 
 ---
@@ -164,8 +214,11 @@ linux-k8s-lab/
 │   ├── cert-manager/
 │   │   ├── demo-certificate.yml
 │   │   └── selfsigned-clusterissuer.yml
-│   └── ingress/
-│       └── demo-ingress.yml
+│   ├── ingress/
+│   │   └── demo-ingress.yml
+│   └── gateway-api/
+│       ├── gateway.yml
+│       └── httproute.yml
 ├── playbooks/
 │   ├── site.yml
 │   ├── 00-ping.yml
@@ -181,7 +234,8 @@ linux-k8s-lab/
 │   ├── 10-install-ingress-nginx.yml
 │   ├── 11-create-demo-ingress.yml
 │   ├── 12-install-cert-manager.yml
-│   └── 13-create-demo-tls.yml
+│   ├── 13-create-demo-tls.yml
+│   └── 14-install-gateway-api.yml
 ├── roles/
 │   ├── base_linux/
 │   ├── cert_manager/
@@ -189,6 +243,7 @@ linux-k8s-lab/
 │   ├── demo_app/
 │   ├── demo_ingress/
 │   ├── demo_tls/
+│   ├── gateway_api/
 │   ├── helm/
 │   ├── ingress_nginx/
 │   ├── kubernetes_common/
@@ -486,7 +541,26 @@ TLS Secret demo-local-tls
 Ingress TLS Binding
 ```
 
-### 14. Cluster prüfen
+### 14. Gateway API installieren und konfigurieren
+
+```bash
+ansible-playbook playbooks/14-install-gateway-api.yml --ask-vault-pass
+```
+
+Dieses Playbook ruft die Rolle `gateway_api` auf.
+
+Erstellt und prüft:
+
+```text
+Gateway API CRDs
+NGINX Gateway Fabric
+GatewayClass nginx
+Gateway demo-gateway
+HTTPRoute demo-nginx-route
+Gateway NodePort Service
+```
+
+### 15. Cluster prüfen
 
 ```bash
 ansible-playbook playbooks/06-verify-cluster.yml --ask-vault-pass
@@ -511,6 +585,11 @@ cert-manager Pods
 Certificate Status
 TLS Secret
 TLS Binding im Ingress
+NGINX Gateway Fabric Pods
+GatewayClass
+Gateway
+HTTPRoute
+Gateway NodePort Service
 ```
 
 Erwarteter Zustand:
@@ -522,6 +601,9 @@ demo-nginx      Running
 ingress-nginx   Running
 cert-manager    Running
 demo-local-tls  Ready=True
+gatewayclass   nginx Accepted=True
+demo-gateway   Programmed=True
+demo-nginx-route vorhanden
 ```
 
 ---
@@ -569,19 +651,59 @@ Wenn `demo.local` in der lokalen hosts-Datei gesetzt ist:
 
 ```bash
 curl -k https://demo.local:32685
+http://gateway.demo.local:31977
 ```
 
 Alternativ ohne hosts-Datei:
 
 ```bash
 curl -k --resolve demo.local:32685:192.168.0.202 https://demo.local:32685
+http://gateway.demo.local:31977
+```
+
+---
+
+## Zugriff über Gateway API
+
+Gateway API läuft parallel zum bestehenden Ingress-Setup.
+
+Aktueller Zugriff:
+
+```bash
+curl -H "Host: gateway.demo.local" http://192.168.0.173:31977
+```
+
+Erwartung:
+
+```text
+HTTP/1.1 200 OK
+Welcome to nginx!
+```
+
+Der Gateway-Service nutzt aktuell:
+
+```text
+externalTrafficPolicy: Local
+```
+
+Deshalb funktioniert der externe NodePort-Zugriff aktuell über den Worker-Node `192.168.0.173`, weil dort der Gateway-Pod läuft.
+
+Wichtige Ressourcen:
+
+```text
+Namespace: nginx-gateway
+GatewayClass: nginx
+Gateway: demo-gateway
+HTTPRoute: demo-nginx-route
+Hostname: gateway.demo.local
+NodePort: 31977
 ```
 
 ---
 
 ## Windows hosts-Datei
 
-Für den Browser-Test unter Windows muss `demo.local` lokal auf einen Kubernetes Node zeigen.
+Für den Browser-Test unter Windows müssen `demo.local` und optional `gateway.demo.local` lokal auf Kubernetes Nodes zeigen.
 
 Datei als Administrator öffnen:
 
@@ -593,6 +715,7 @@ Eintrag:
 
 ```text
 192.168.0.202 demo.local
+192.168.0.173 gateway.demo.local
 ```
 
 Danach im Browser:
@@ -600,6 +723,7 @@ Danach im Browser:
 ```text
 http://demo.local:30520
 https://demo.local:32685
+http://gateway.demo.local:31977
 ```
 
 Bei HTTPS erscheint wegen des Self-Signed-Zertifikats eine Zertifikatswarnung.
@@ -675,6 +799,57 @@ In diesem Lab:
 ingressClassName: nginx
 ```
 
+### Gateway API
+
+Gateway API ist ein moderneres Kubernetes-Networking-Modell als Ingress.
+
+In diesem Lab wird Gateway API zusätzlich zum bestehenden Ingress-Setup betrieben.
+
+### NGINX Gateway Fabric
+
+NGINX Gateway Fabric ist der Gateway API Controller in diesem Lab.
+
+Er setzt die Gateway API Ressourcen technisch um und erstellt den Gateway-Dataplane-Pod.
+
+### GatewayClass
+
+Die GatewayClass beschreibt, welcher Controller Gateway-Ressourcen verarbeitet.
+
+In diesem Lab:
+
+```text
+GatewayClass: nginx
+Controller: gateway.nginx.org/nginx-gateway-controller
+Accepted: True
+```
+
+### Gateway
+
+Das Gateway beschreibt den Einstiegspunkt für Traffic.
+
+In diesem Lab:
+
+```text
+Gateway: demo-gateway
+Namespace: nginx-gateway
+Hostname: gateway.demo.local
+Port: 80
+Programmed: True
+```
+
+### HTTPRoute
+
+Die HTTPRoute beschreibt die Routing-Regel von einem Hostnamen zu einem Backend-Service.
+
+In diesem Lab:
+
+```text
+HTTPRoute: demo-nginx-route
+Hostname: gateway.demo.local
+Backend: demo-nginx
+Port: 80
+```
+
 ### cert-manager
 
 cert-manager erstellt und verwaltet Kubernetes-Zertifikate automatisch.
@@ -731,6 +906,20 @@ Client
 
 Intern im Cluster geht der Traffic aktuell per HTTP weiter.
 
+### Gateway API
+
+```text
+Client
+→ gateway.demo.local:31977
+→ demo-gateway-nginx NodePort
+→ Gateway demo-gateway
+→ HTTPRoute demo-nginx-route
+→ demo-nginx ClusterIP Service
+→ demo-nginx Pod
+```
+
+Auch hier bleibt der Backend-Service `demo-nginx` ein interner `ClusterIP` Service.
+
 ---
 
 ## Nützliche kubectl-Befehle
@@ -777,6 +966,18 @@ kubectl describe certificate demo-local-tls -n demo
 kubectl get secret demo-local-tls -n demo
 ```
 
+### Gateway API prüfen
+
+```bash
+kubectl get pods -n nginx-gateway -o wide
+kubectl get svc -n nginx-gateway
+kubectl get gatewayclass
+kubectl get gateway -A
+kubectl get httproute -n demo
+kubectl describe gateway demo-gateway -n nginx-gateway
+kubectl describe httproute demo-nginx-route -n demo
+```
+
 ### kubeadm Tokens prüfen
 
 ```bash
@@ -794,6 +995,8 @@ sudo kubeadm token list
 - Join Tokens werden nicht im Ansible Output angezeigt.
 - Das aktuelle TLS-Zertifikat ist Self-Signed und nur für das lokale Lab gedacht.
 - Für produktionsähnliche Umgebungen wären eine interne CA, ACME oder Let’s Encrypt sinnvoll.
+- Der Gateway API NodePort nutzt aktuell `externalTrafficPolicy: Local`; dadurch ist der externe Zugriff an den Node mit lokalem Gateway-Pod gebunden.
+- In produktionsnahen Umgebungen würde man vor Gateway/Ingress typischerweise LoadBalancer, MetalLB, Cloud Load Balancer oder eine dedizierte Edge-Komponente verwenden.
 
 ---
 
@@ -829,6 +1032,12 @@ cert-manager
 Certificate
 TLS Secret
 HTTPS Ingress
+Gateway API
+GatewayClass
+Gateway
+HTTPRoute
+NGINX Gateway Fabric
+externalTrafficPolicy Local
 Cluster Verification
 ```
 
@@ -858,11 +1067,10 @@ Network Policies lernen
 ### Moderne Kubernetes APIs
 
 ```text
-Gateway API kennenlernen
-HTTPRoute
-GatewayClass
-Gateway
-Vergleich Ingress vs Gateway API
+Gateway API weiter vertiefen
+HTTPRoute Features testen
+Gateway API mit TLS erweitern
+Vergleich Ingress vs Gateway API dokumentieren
 ```
 
 ### Plattform-Erweiterungen
@@ -892,7 +1100,7 @@ Server automatisiert vorbereiten
 Cluster reproduzierbar aufbauen
 Worker Nodes verwalten
 Workloads deployen
-Ingress und TLS betreiben
+Ingress, TLS und Gateway API betreiben
 Cluster-Zustand verifizieren
 Änderungen versionieren
 ```

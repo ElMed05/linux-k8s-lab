@@ -110,7 +110,7 @@
   changed_when: false
 
 - name: Show HTTPRoute
-  ansible.builtin.command: kubectl get httproute -n {{ gateway_api_route_namespace }}
+  ansible.builtin.command: kubectl get httproute -A #-n {{ gateway_api_route_namespace }}
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   register: httproute_status

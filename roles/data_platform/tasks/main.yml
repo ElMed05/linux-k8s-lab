@@ -25,6 +25,23 @@
     'created' in apply_data_platform_namespace.stdout or
     'configured' in apply_data_platform_namespace.stdout
 
+- name: Create GHCR image pull secret
+  ansible.builtin.shell: >
+    kubectl create secret docker-registry ghcr-secret
+    --docker-server=ghcr.io
+    --docker-username={{ ghcr_username }}
+    --docker-password={{ ghcr_token }}
+    --namespace={{ data_platform_namespace }}
+    --dry-run=client -o yaml
+    | kubectl apply -f -
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: ghcr_secret_apply
+  changed_when: >
+    'created' in ghcr_secret_apply.stdout or
+    'configured' in ghcr_secret_apply.stdout
+  no_log: true
+
 - name: Apply PostgreSQL secret
   ansible.builtin.command: >
     kubectl apply -f {{ data_platform_remote_manifest_dir }}/postgres-secret.yaml
@@ -34,7 +51,7 @@
   changed_when: >
     'created' in apply_postgres_secret.stdout or
     'configured' in apply_postgres_secret.stdout
-    
+
 - name: Apply PostgreSQL PersistentVolume
   ansible.builtin.command: >
     kubectl apply -f {{ data_platform_remote_manifest_dir }}/postgres-pv.yaml
@@ -74,6 +91,53 @@
   changed_when: >
     'created' in apply_postgres_service.stdout or
     'configured' in apply_postgres_service.stdout
+
+- name: Apply Data API deployment
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/data-api-deployment.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_data_api_deployment
+  changed_when: >
+    'created' in apply_data_api_deployment.stdout or
+    'configured' in apply_data_api_deployment.stdout
+
+- name: Apply Data API service
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/data-api-service.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_data_api_service
+  changed_when: >
+    'created' in apply_data_api_service.stdout or
+    'configured' in apply_data_api_service.stdout
+
+- name: Check Data API HTTPRoute manifest diff
+  ansible.builtin.command: >
+    kubectl diff -f {{ data_platform_remote_manifest_dir }}/data-api-httproute.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: data_api_httproute_diff
+  changed_when: false
+  failed_when: data_api_httproute_diff.rc not in [0, 1]
+
+- name: Apply Data API HTTPRoute
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/data-api-httproute.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_data_api_httproute
+  changed_when: data_api_httproute_diff.rc == 1
+  when: data_api_httproute_diff.rc == 1
+
+- name: Wait for Data API deployment rollout
+  ansible.builtin.command: >
+    kubectl rollout status deployment/data-api
+    -n {{ data_platform_namespace }}
+    --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false    
 
 - name: Wait for PostgreSQL deployment rollout
   ansible.builtin.command: >

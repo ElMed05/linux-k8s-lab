@@ -6,10 +6,18 @@ metadata:
 spec:
   gatewayClassName: nginx
   listeners:
-    - name: http
+    - name: demo-http
       protocol: HTTP
       port: 80
       hostname: gateway.demo.local
+      allowedRoutes:
+        namespaces:
+          from: All
+
+    - name: data-api-http
+      protocol: HTTP
+      port: 80
+      hostname: api.data.local
       allowedRoutes:
         namespaces:
           from: All
