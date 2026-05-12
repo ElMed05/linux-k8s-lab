@@ -130,6 +130,16 @@
   changed_when: data_api_httproute_diff.rc == 1
   when: data_api_httproute_diff.rc == 1
 
+- name: Apply Data Generator CronJob
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/data-generator-cronjob.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_data_generator_cronjob
+  changed_when: >
+    'created' in apply_data_generator_cronjob.stdout or
+    'configured' in apply_data_generator_cronjob.stdout
+
 - name: Wait for Data API deployment rollout
   ansible.builtin.command: >
     kubectl rollout status deployment/data-api
