@@ -140,6 +140,73 @@
     'created' in apply_data_generator_cronjob.stdout or
     'configured' in apply_data_generator_cronjob.stdout
 
+- name: Apply Metabase database init job
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/metabase-db-init-job.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_metabase_db_init_job
+  changed_when: >
+    'created' in apply_metabase_db_init_job.stdout or
+    'configured' in apply_metabase_db_init_job.stdout
+
+- name: Wait for Metabase database init job
+  ansible.builtin.command: >
+    kubectl wait --for=condition=complete
+    job/metabase-db-init
+    -n {{ data_platform_namespace }}
+    --timeout=120s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Apply Metabase deployment
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/metabase-deployment.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_metabase_deployment
+  changed_when: >
+    'created' in apply_metabase_deployment.stdout or
+    'configured' in apply_metabase_deployment.stdout
+
+- name: Apply Metabase service
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/metabase-service.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_metabase_service
+  changed_when: >
+    'created' in apply_metabase_service.stdout or
+    'configured' in apply_metabase_service.stdout
+
+- name: Check Metabase HTTPRoute manifest diff
+  ansible.builtin.command: >
+    kubectl diff -f {{ data_platform_remote_manifest_dir }}/metabase-httproute.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: metabase_httproute_diff
+  changed_when: false
+  failed_when: metabase_httproute_diff.rc not in [0, 1]
+
+- name: Apply Metabase HTTPRoute
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/metabase-httproute.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_metabase_httproute
+  changed_when: metabase_httproute_diff.rc == 1
+  when: metabase_httproute_diff.rc == 1
+
+- name: Wait for Metabase deployment rollout
+  ansible.builtin.command: >
+    kubectl rollout status deployment/metabase
+    -n {{ data_platform_namespace }}
+    --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
 - name: Wait for Data API deployment rollout
   ansible.builtin.command: >
     kubectl rollout status deployment/data-api

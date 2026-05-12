@@ -1,0 +1,24 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: metabase-db-init
+  namespace: data-platform
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: metabase-db-init
+          image: postgres:16-alpine
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+          command:
+            - /bin/sh
+            - -c
+            - |
+              psql -h postgres -U dataplatform -d dataplatform -tc "SELECT 1 FROM pg_database WHERE datname = 'metabase'" | grep -q 1 || \
+              psql -h postgres -U dataplatform -d dataplatform -c "CREATE DATABASE metabase;"
