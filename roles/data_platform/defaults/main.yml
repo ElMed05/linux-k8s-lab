@@ -1,0 +1,7 @@
+---
+data_platform_namespace: "data-platform"
+
+data_platform_local_manifest_dir: "../apps/data-platform/k8s"
+data_platform_remote_manifest_dir: "/tmp/data-platform-k8s"
+
+data_platform_postgres_deployment: "postgres"

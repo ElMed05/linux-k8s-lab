@@ -1,0 +1,107 @@
+---
+- name: Ensure remote data platform manifest directory exists
+  ansible.builtin.file:
+    path: "{{ data_platform_remote_manifest_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Copy data platform manifests to control plane
+  ansible.builtin.copy:
+    src: "{{ data_platform_local_manifest_dir }}/"
+    dest: "{{ data_platform_remote_manifest_dir }}/"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply data platform namespace
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/namespace.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_data_platform_namespace
+  changed_when: >
+    'created' in apply_data_platform_namespace.stdout or
+    'configured' in apply_data_platform_namespace.stdout
+
+- name: Apply PostgreSQL secret
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/postgres-secret.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_postgres_secret
+  changed_when: >
+    'created' in apply_postgres_secret.stdout or
+    'configured' in apply_postgres_secret.stdout
+    
+- name: Apply PostgreSQL PersistentVolume
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/postgres-pv.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_postgres_pv
+  changed_when: >
+    'created' in apply_postgres_pv.stdout or
+    'configured' in apply_postgres_pv.stdout
+
+- name: Apply PostgreSQL PVC
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/postgres-pvc.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_postgres_pvc
+  changed_when: >
+    'created' in apply_postgres_pvc.stdout or
+    'configured' in apply_postgres_pvc.stdout
+
+- name: Apply PostgreSQL deployment
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/postgres-deployment.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_postgres_deployment
+  changed_when: >
+    'created' in apply_postgres_deployment.stdout or
+    'configured' in apply_postgres_deployment.stdout
+
+- name: Apply PostgreSQL service
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/postgres-service.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_postgres_service
+  changed_when: >
+    'created' in apply_postgres_service.stdout or
+    'configured' in apply_postgres_service.stdout
+
+- name: Wait for PostgreSQL deployment rollout
+  ansible.builtin.command: >
+    kubectl rollout status deployment/{{ data_platform_postgres_deployment }}
+    -n {{ data_platform_namespace }}
+    --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Show data platform resources
+  ansible.builtin.command: >
+    kubectl get all -n {{ data_platform_namespace }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: data_platform_resources
+  changed_when: false
+
+- name: Show data platform PVCs
+  ansible.builtin.command: >
+    kubectl get pvc -n {{ data_platform_namespace }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: data_platform_pvcs
+  changed_when: false
+
+- name: Print data platform status
+  ansible.builtin.debug:
+    msg:
+      - "{{ data_platform_resources.stdout_lines }}"
+      - "{{ data_platform_pvcs.stdout_lines }}"
