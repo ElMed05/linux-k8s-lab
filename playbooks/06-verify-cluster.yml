@@ -257,6 +257,57 @@
       changed_when: false
       failed_when: false
 
+    - name: Get data processing CronJob
+      ansible.builtin.command: kubectl get cronjob data-processing -n data-platform
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: data_processing_cronjob
+      changed_when: false
+
+    - name: Get data processing jobs
+      ansible.builtin.command: kubectl get jobs -n data-platform -l app=data-processing
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: data_processing_jobs
+      changed_when: false
+      failed_when: false
+
+    - name: Check service_health_summary table
+      ansible.builtin.command: >
+        kubectl exec -n data-platform deploy/postgres --
+        psql -U dataplatform -d dataplatform
+        -c 'SELECT service_name, avg_error_rate, incident_count, health_score, calculated_at FROM service_health_summary ORDER BY health_score ASC;'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: service_health_summary
+      changed_when: false
+
+    - name: Count service health summary records
+      ansible.builtin.command: >
+        kubectl exec -n data-platform deploy/postgres --
+        psql -U dataplatform -d dataplatform
+        -t -c 'SELECT COUNT(*) FROM service_health_summary;'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: service_health_summary_count
+      changed_when: false
+
+    - name: Check MinIO processed service health summary objects
+      ansible.builtin.shell: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf run mc-verify-processed-summary
+        -n data-platform
+        --rm -i
+        --restart=Never
+        --image=minio/mc
+        --env="MINIO_ROOT_USER=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf get secret minio-secret -n data-platform -o jsonpath={.data.MINIO_ROOT_USER} | base64 -d)"
+        --env="MINIO_ROOT_PASSWORD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf get secret minio-secret -n data-platform -o jsonpath={.data.MINIO_ROOT_PASSWORD} | base64 -d)"
+        --command -- /bin/sh -c
+        "mc alias set local http://minio-api:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD &&
+        mc find local/processed/service_health_summary --maxdepth 10 | head -n 10"
+      register: minio_processed_summary
+      changed_when: false
+      failed_when: false
+
     - name: Show verification result
       ansible.builtin.debug:
         msg:
@@ -294,3 +345,9 @@
           - "{{ minio_raw_metrics.stdout_lines }}"
           - "MinIO raw incidents sample:"
           - "{{ minio_raw_incidents.stdout_lines }}"
+          - "{{ data_processing_cronjob.stdout_lines }}"
+          - "{{ data_processing_jobs.stdout_lines }}"
+          - "{{ service_health_summary.stdout_lines }}"
+          - "service_health_summary count: {{ service_health_summary_count.stdout | trim }}"
+          - "MinIO processed service health summary sample:"
+          - "{{ minio_processed_summary.stdout_lines }}"

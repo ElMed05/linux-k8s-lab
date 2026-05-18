@@ -54,6 +54,21 @@ def init_db():
         );
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS service_health_summary (
+            id SERIAL PRIMARY KEY,
+            service_name VARCHAR(255) NOT NULL,
+            avg_cpu_usage NUMERIC(10,2),
+            avg_memory_usage NUMERIC(10,2),
+            avg_response_time_ms NUMERIC(10,2),
+            avg_error_rate NUMERIC(10,2),
+            total_requests BIGINT,
+            incident_count INTEGER,
+            health_score NUMERIC(10,2),
+            calculated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+    """)
+
     conn.commit()
     cur.close()
     conn.close()
