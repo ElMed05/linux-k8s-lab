@@ -1,4 +1,4 @@
-# Linux Kubernetes Lab mit Ansible, Helm, Ingress, TLS, Gateway API und Data Platform
+# Linux Kubernetes Lab mit Ansible, Helm, Ingress, TLS, Gateway API, Data Platform und Lakehouse Foundation
 
 Dieses Projekt baut ein praxisnahes Kubernetes-Lab auf Basis von Ubuntu Server VMs in VMware Workstation auf.
 
@@ -34,6 +34,8 @@ Data Platform
 ├── data-generator CronJob
 ├── data-api FastAPI Service
 ├── PostgreSQL mit PersistentVolume
+├── MinIO Object Storage
+├── Raw / Processed / Curated Buckets
 └── Metabase Dashboard
 ```
 
@@ -78,6 +80,7 @@ VMware Workstation
     ├── Gateway/Data-Plane Pods
     ├── Data API
     ├── PostgreSQL
+    ├── MinIO Object Storage
     └── Metabase
 ```
 
@@ -85,7 +88,7 @@ VMware Workstation
 
 ## Data Platform Architektur
 
-Die Data Platform bildet eine kleine, aber realistische Pipeline ab:
+Die Data Platform bildet eine kleine, aber realistische Pipeline ab. Die API speichert strukturierte Daten in PostgreSQL und legt die rohen Events zusätzlich im MinIO Raw Bucket ab.
 
 ```text
 Kubernetes CronJob
@@ -97,13 +100,18 @@ data-generator
         ▼
 data-api FastAPI
         │
-        │ schreibt strukturierte Daten
-        ▼
-PostgreSQL
+        ├── strukturierte Daten
+        │       ▼
+        │   PostgreSQL
+        │       ▼
+        │   Metabase Dashboard
         │
-        │ wird als Datenquelle genutzt von
-        ▼
-Metabase Dashboard
+        └── rohe JSON Events
+                ▼
+            MinIO Object Storage
+                ├── raw
+                ├── processed
+                └── curated
 ```
 
 ### Datenfluss
@@ -114,8 +122,8 @@ data-generator
 → POST /metrics
 → POST /incidents
 → data-api
-→ PostgreSQL
-→ Metabase Dashboard
+├── PostgreSQL → Metabase Dashboard
+└── MinIO raw/metrics + raw/incidents
 ```
 
 ### Data Platform Komponenten
@@ -124,12 +132,15 @@ data-generator
 |---|---|
 | `data-generator` | Kubernetes CronJob, erzeugt regelmäßig Service-Metriken und Incidents |
 | `data-api` | FastAPI Ingestion API für Betriebsdaten |
-| `postgres` | Persistente Speicherung der Data Platform Daten |
+| `postgres` | Persistente Speicherung der strukturierten Data Platform Daten |
+| `minio` | S3-kompatibler Object Storage für Raw Events und spätere Lakehouse-/MLOps-Artefakte |
 | `metabase` | Dashboard- und BI-Oberfläche |
 | `ghcr-secret` | Kubernetes Image Pull Secret für private GHCR Images |
 | `postgres-local-pv` | Lokales PersistentVolume für PostgreSQL |
+| `minio-local-pv` | Lokales PersistentVolume für MinIO |
 | `data-api-route` | Gateway API Route für die Data API |
 | `metabase-route` | Gateway API Route für das Dashboard |
+| `minio-route` | Gateway API Route für die MinIO Console |
 
 ### Data Platform Datenmodell
 
@@ -165,6 +176,28 @@ incidents
 └── resolved
 ```
 
+### Lakehouse Raw Zone
+
+Rohe Events werden zusätzlich als JSON-Dateien in MinIO gespeichert.
+
+```text
+MinIO Bucket: raw
+
+raw/
+├── metrics/
+│   └── YYYY/MM/DD/<timestamp>-<uuid>.json
+└── incidents/
+    └── YYYY/MM/DD/<timestamp>-<uuid>.json
+```
+
+Die Buckets sind vorbereitet für spätere Data-Processing- und MLOps-Schritte:
+
+```text
+raw        → unveränderte Events
+processed  → transformierte Daten
+curated    → aggregierte, analyse- oder ML-fähige Daten
+```
+
 ### Data Platform Routing
 
 ```text
@@ -181,6 +214,13 @@ dashboard.data.local:31977
 → HTTPRoute metabase-route
 → Service metabase
 → Metabase Pod
+
+minio.data.local:31977
+→ NGINX Gateway Fabric
+→ Gateway demo-gateway
+→ HTTPRoute minio-route
+→ Service minio-console
+→ MinIO Console
 ```
 
 ---
@@ -234,6 +274,7 @@ Zusätzlich routet derselbe Gateway auch die Data Platform:
 ```text
 api.data.local:31977
 dashboard.data.local:31977
+minio.data.local:31977
 ```
 
 Wichtig: Der Gateway-Service nutzt aktuell `externalTrafficPolicy: Local`. Deshalb funktioniert der NodePort-Zugriff über den Worker-Node, auf dem der Gateway-Pod läuft:
@@ -273,9 +314,13 @@ k8s-worker-01 / 192.168.0.173
 - Data Platform Namespace `data-platform`
 - PostgreSQL mit lokalem PersistentVolume
 - FastAPI Data API als eigenes Container Image aus GHCR
+- Data API schreibt strukturierte Daten nach PostgreSQL und Raw Events nach MinIO
 - Data Generator CronJob als eigenes Container Image aus GHCR
 - Metabase Dashboard für Data Platform Daten
-- Gateway API Routes für `api.data.local` und `dashboard.data.local`
+- MinIO als S3-kompatibler Object Storage
+- Buckets `raw`, `processed` und `curated`
+- Raw Events unter `raw/metrics/...json` und `raw/incidents/...json`
+- Gateway API Routes für `api.data.local`, `dashboard.data.local` und `minio.data.local`
 - Verify-Playbook prüft Kubernetes, Gateway API und Data Platform Health
 - Worker-Join-Playbook ist idempotent
 - kubeadm Join Tokens werden nur erzeugt, wenn Worker noch nicht gejoint sind
@@ -328,6 +373,7 @@ PostgreSQL
 FastAPI data-api
 data-generator CronJob
 Metabase
+MinIO Object Storage
 GHCR imagePullSecret
 Local PersistentVolume
 Gateway API HTTPRoutes
@@ -361,7 +407,8 @@ linux-k8s-lab/
 │       │       ├── __init__.py
 │       │       ├── database.py
 │       │       ├── main.py
-│       │       └── models.py
+│       │       ├── models.py
+│       │       └── object_storage.py
 │       ├── data-generator/
 │       │   ├── Dockerfile
 │       │   ├── requirements.txt
@@ -380,7 +427,13 @@ linux-k8s-lab/
 │       │   ├── metabase-db-init-job.yaml
 │       │   ├── metabase-deployment.yaml
 │       │   ├── metabase-service.yaml
-│       │   └── metabase-httproute.yaml
+│       │   ├── metabase-httproute.yaml
+│       │   ├── minio-pv.yaml
+│       │   ├── minio-pvc.yaml
+│       │   ├── minio-deployment.yaml
+│       │   ├── minio-service.yaml
+│       │   ├── minio-httproute.yaml
+│       │   └── minio-bucket-init-job.yaml
 │       └── docs/
 ├── manifests/
 │   ├── cert-manager/
@@ -459,7 +512,7 @@ roles/
 ├── gateway_api/
 │   └── Gateway API CRDs, NGINX Gateway Fabric, Gateway und HTTPRoute
 └── data_platform/
-    └── PostgreSQL, Data API, CronJob Generator, Metabase und Gateway Routes
+    └── PostgreSQL, Data API, CronJob Generator, Metabase, MinIO, Buckets und Gateway Routes
 ```
 
 ---
@@ -484,7 +537,7 @@ k8s_workers
 
 ## Ansible Vault
 
-Sudo-Passwörter und GHCR-Zugangsdaten werden nicht im Klartext im Repository gespeichert, sondern über Ansible Vault verschlüsselt.
+Sudo-Passwörter, GHCR-Zugangsdaten und MinIO-Zugangsdaten werden nicht im Klartext im Repository gespeichert, sondern über Ansible Vault verschlüsselt.
 
 Beispielstruktur:
 
@@ -494,12 +547,15 @@ inventories/lab/host_vars/k8s-worker-01/vault.yml
 inventories/lab/group_vars/all/vault-ghcr.yml
 ```
 
-GHCR-Zugangsdaten vor Verschlüsselung:
+GHCR- und MinIO-Zugangsdaten vor Verschlüsselung:
 
 ```yaml
 ---
 ghcr_username: "GITHUB_USERNAME"
 ghcr_token: "GITHUB_TOKEN_WITH_READ_PACKAGES"
+
+minio_root_user: "MINIO_USER"
+minio_root_password: "MINIO_PASSWORD"
 ```
 
 Ausführen mit Vault:
@@ -560,6 +616,12 @@ Data Generator CronJob
 Metabase DB Init Job
 Metabase Deployment + Service
 Metabase HTTPRoute
+MinIO Secret
+MinIO PersistentVolume + PVC
+MinIO Deployment + API/Console Services
+MinIO HTTPRoute
+MinIO Bucket Init Job
+Buckets raw, processed, curated
 ```
 
 ---
@@ -596,6 +658,10 @@ Metabase Health über Gateway API
 PostgreSQL Tabellen
 service_metrics Record Count
 incidents Record Count
+MinIO Gateway Health
+MinIO Buckets
+MinIO raw metrics sample
+MinIO raw incidents sample
 ```
 
 Erwarteter Zustand:
@@ -616,6 +682,9 @@ data-generator      CronJob vorhanden
 postgres-data       Bound
 api.data.local      erreichbar
 dashboard.data.local erreichbar
+minio.data.local erreichbar
+MinIO Buckets raw, processed, curated vorhanden
+Raw Events in MinIO vorhanden
 ```
 
 Beispiel aus dem Verify-Output:
@@ -623,8 +692,10 @@ Beispiel aus dem Verify-Output:
 ```text
 Data API Gateway Health: {"status":"healthy","service":"data-api"}
 HTTP/1.1 200 OK
-service_metrics count: 310
-incidents count: 64
+service_metrics count: 1130
+incidents count: 269
+MinIO raw metrics sample: local/raw/metrics/...
+MinIO raw incidents sample: local/raw/incidents/...
 ```
 
 ---
@@ -694,6 +765,7 @@ Erwartung:
 
 ```text
 http://dashboard.data.local:31977
+http://minio.data.local:31977
 ```
 
 Metabase verbindet sich mit PostgreSQL:
@@ -716,6 +788,27 @@ Incidents by Severity
 Service Health Score
 ```
 
+### MinIO Console
+
+```text
+http://minio.data.local:31977
+```
+
+MinIO enthält die Lakehouse-Buckets:
+
+```text
+raw
+processed
+curated
+```
+
+Raw Events werden aktuell hier abgelegt:
+
+```text
+raw/metrics/YYYY/MM/DD/<timestamp>-<uuid>.json
+raw/incidents/YYYY/MM/DD/<timestamp>-<uuid>.json
+```
+
 ---
 
 ## Windows hosts-Datei
@@ -735,6 +828,7 @@ Einträge:
 192.168.0.173 gateway.demo.local
 192.168.0.173 api.data.local
 192.168.0.173 dashboard.data.local
+192.168.0.173 minio.data.local
 ```
 
 Danach im Browser:
@@ -745,6 +839,7 @@ https://demo.local:32685
 http://gateway.demo.local:31977
 http://api.data.local:31977/health
 http://dashboard.data.local:31977
+http://minio.data.local:31977
 ```
 
 ---
@@ -754,7 +849,7 @@ http://dashboard.data.local:31977
 Eigene Images werden in GitHub Container Registry veröffentlicht:
 
 ```text
-ghcr.io/elmed05/data-platform-api:0.1.0
+ghcr.io/elmed05/data-platform-api:0.2.0
 ghcr.io/elmed05/data-generator:0.1.0
 ```
 
@@ -771,7 +866,9 @@ Das Secret wird über Ansible aus Vault-Daten erzeugt.
 
 ## Storage
 
-PostgreSQL nutzt ein lokales PersistentVolume auf dem Worker-Node.
+PostgreSQL und MinIO nutzen lokale PersistentVolumes auf dem Worker-Node.
+
+### PostgreSQL Storage
 
 ```text
 Node: k8s-worker-01
@@ -780,6 +877,18 @@ PV: postgres-local-pv
 PVC: postgres-data
 StorageClass: local-storage
 Access Mode: ReadWriteOnce
+```
+
+### MinIO Storage
+
+```text
+Node: k8s-worker-01
+Pfad: /mnt/data-platform/minio
+PV: minio-local-pv
+PVC: minio-data
+StorageClass: minio-local-storage
+Access Mode: ReadWriteOnce
+Buckets: raw, processed, curated
 ```
 
 Der Storage ist bewusst einfach gehalten, aber persistent und nachvollziehbar.
@@ -807,6 +916,8 @@ ClusterIP
 NodePort
 PersistentVolume
 PersistentVolumeClaim
+Object Storage
+Bucket
 CronJob
 Secret
 Ingress
@@ -826,6 +937,7 @@ Aktuelle Gateway API Hostnames:
 gateway.demo.local     → demo-nginx
 api.data.local         → data-api
 dashboard.data.local   → metabase
+minio.data.local       → minio-console
 ```
 
 ---
@@ -893,6 +1005,28 @@ Client
 → PostgreSQL
 ```
 
+### MinIO über Gateway API
+
+```text
+Client
+→ minio.data.local:31977
+→ demo-gateway-nginx NodePort
+→ Gateway demo-gateway
+→ HTTPRoute minio-route
+→ minio-console ClusterIP Service
+→ MinIO Pod
+→ minio-data PVC
+```
+
+### Raw Event Storage
+
+```text
+data-generator
+→ data-api
+├── PostgreSQL: service_metrics / incidents
+└── MinIO: raw/metrics und raw/incidents
+```
+
 ---
 
 ## Nützliche kubectl-Befehle
@@ -934,6 +1068,7 @@ kubectl describe gateway demo-gateway -n nginx-gateway
 kubectl describe httproute demo-nginx-route -n demo
 kubectl describe httproute data-api-route -n data-platform
 kubectl describe httproute metabase-route -n data-platform
+kubectl describe httproute minio-route -n data-platform
 ```
 
 ### Data Platform prüfen
@@ -945,6 +1080,23 @@ kubectl get svc -n data-platform
 kubectl get pvc -n data-platform
 kubectl get cronjob -n data-platform
 kubectl get jobs -n data-platform
+```
+
+### MinIO prüfen
+
+```bash
+kubectl get pods -n data-platform -l app=minio -o wide
+kubectl get svc -n data-platform | grep minio
+kubectl get pvc -n data-platform | grep minio
+kubectl get httproute minio-route -n data-platform
+```
+
+### MinIO Buckets und Raw Events prüfen
+
+```bash
+kubectl run mc-check -n data-platform --rm -i --restart=Never --image=minio/mc   --command -- /bin/sh -c "mc alias set local http://minio-api:9000 <USER> <PASSWORD> && mc ls local"
+
+kubectl run mc-check -n data-platform --rm -i --restart=Never --image=minio/mc   --command -- /bin/sh -c "mc alias set local http://minio-api:9000 <USER> <PASSWORD> && mc find local/raw --maxdepth 10"
 ```
 
 ### PostgreSQL Tabellen prüfen
@@ -977,13 +1129,14 @@ kubectl exec -n data-platform deploy/postgres -- \
 - SSH-Zugriff läuft per SSH-Key.
 - sudo-Passwörter werden mit Ansible Vault verwaltet.
 - GHCR Token wird mit Ansible Vault verwaltet.
+- MinIO Zugangsdaten werden mit Ansible Vault verwaltet.
 - kubeadm Join Tokens werden nicht dauerhaft benötigt.
 - Das Join-Playbook erzeugt nur dann neue Tokens, wenn Worker noch nicht gejoint sind.
 - Join Tokens werden nicht im Ansible Output angezeigt.
 - Das aktuelle TLS-Zertifikat ist Self-Signed und nur für das lokale Lab gedacht.
 - Für produktionsähnliche Umgebungen wären eine interne CA, ACME oder Let’s Encrypt sinnvoll.
 - Der Gateway API NodePort nutzt aktuell `externalTrafficPolicy: Local`; dadurch ist der externe Zugriff an den Node mit lokalem Gateway-Pod gebunden.
-- PostgreSQL-Zugangsdaten sind für das lokale Lab einfach gehalten.
+- PostgreSQL- und MinIO-Zugangsdaten sind für das lokale Lab einfach gehalten.
 - Für produktionsnähere Setups wären External Secrets, Sealed Secrets oder Vault sinnvoll.
 - Für produktionsnähere Datenhaltung wären replizierter Storage und Backup/Restore wichtig.
 - In produktionsnahen Umgebungen würde man vor Gateway/Ingress typischerweise LoadBalancer, MetalLB, Cloud Load Balancer oder eine dedizierte Edge-Komponente verwenden.
@@ -1036,7 +1189,10 @@ ImagePullSecret
 FastAPI auf Kubernetes
 Kubernetes CronJob
 Metabase Dashboard
+MinIO Object Storage
+Lakehouse Raw Zone
 Data Ingestion
+Raw Event Storage
 Data Platform Verification
 Cluster Verification
 ```
@@ -1060,6 +1216,8 @@ Daten automatisch erzeugen
 Daten über API aufnehmen
 Daten persistent speichern
 Daten über Dashboard sichtbar machen
+Rohe Events objektbasiert speichern
+Lakehouse-Struktur vorbereiten
 Cluster- und Plattformzustand verifizieren
 Änderungen versionieren
 ```
@@ -1083,12 +1241,12 @@ Manifeste perspektivisch in Helm Chart überführen
 ### Data Platform / Lakehouse Foundation
 
 ```text
-MinIO als S3-kompatibler Object Storage
-Raw Zone für rohe Events
-Processed Zone für transformierte Daten
-Curated Zone für aggregierte Daten
 Data Processing Job
 Service Health Summary Tabelle
+Transformation von Raw Events
+Processed Zone mit transformierten Daten befüllen
+Curated Zone für aggregierte Daten befüllen
+Erste Lakehouse-Pattern dokumentieren
 ```
 
 ### MLOps Foundation
