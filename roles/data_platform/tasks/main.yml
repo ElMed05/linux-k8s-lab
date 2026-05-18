@@ -92,6 +92,140 @@
     'created' in apply_postgres_service.stdout or
     'configured' in apply_postgres_service.stdout
 
+- name: Ensure MinIO local storage directory exists on worker
+  ansible.builtin.file:
+    path: /mnt/data-platform/minio
+    state: directory
+    owner: root
+    group: root
+    mode: "0775"
+  delegate_to: k8s-worker-01
+  become: true
+
+- name: Render MinIO secret manifest
+  ansible.builtin.template:
+    src: minio-secret.yaml.j2
+    dest: "{{ data_platform_remote_manifest_dir }}/minio-secret.yaml"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Apply MinIO secret
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/minio-secret.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_minio_secret
+  changed_when: >
+    'created' in apply_minio_secret.stdout or
+    'configured' in apply_minio_secret.stdout
+  no_log: true
+
+- name: Apply MinIO PersistentVolume
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/minio-pv.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_minio_pv
+  changed_when: >
+    'created' in apply_minio_pv.stdout or
+    'configured' in apply_minio_pv.stdout
+
+- name: Apply MinIO PVC
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/minio-pvc.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_minio_pvc
+  changed_when: >
+    'created' in apply_minio_pvc.stdout or
+    'configured' in apply_minio_pvc.stdout
+
+- name: Apply MinIO deployment
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/minio-deployment.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_minio_deployment
+  changed_when: >
+    'created' in apply_minio_deployment.stdout or
+    'configured' in apply_minio_deployment.stdout
+
+- name: Apply MinIO service
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/minio-service.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_minio_service
+  changed_when: >
+    'created' in apply_minio_service.stdout or
+    'configured' in apply_minio_service.stdout
+
+- name: Check MinIO HTTPRoute manifest diff
+  ansible.builtin.command: >
+    kubectl diff -f {{ data_platform_remote_manifest_dir }}/minio-httproute.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: minio_httproute_diff
+  changed_when: false
+  failed_when: minio_httproute_diff.rc not in [0, 1]
+
+- name: Apply MinIO HTTPRoute
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/minio-httproute.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_minio_httproute
+  changed_when: minio_httproute_diff.rc == 1
+  when: minio_httproute_diff.rc == 1
+
+- name: Wait for MinIO deployment rollout
+  ansible.builtin.command: >
+    kubectl rollout status deployment/minio
+    -n {{ data_platform_namespace }}
+    --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Delete previous MinIO bucket init job
+  ansible.builtin.command: >
+    kubectl delete job minio-bucket-init
+    -n {{ data_platform_namespace }}
+    --ignore-not-found
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Apply MinIO bucket init job
+  ansible.builtin.command: >
+    kubectl apply -f {{ data_platform_remote_manifest_dir }}/minio-bucket-init-job.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_minio_bucket_init_job
+  changed_when: false
+
+- name: Wait for MinIO bucket init job
+  ansible.builtin.command: >
+    kubectl wait --for=condition=complete
+    job/minio-bucket-init
+    -n {{ data_platform_namespace }}
+    --timeout=120s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Show MinIO bucket init logs
+  ansible.builtin.command: >
+    kubectl logs -n {{ data_platform_namespace }}
+    job/minio-bucket-init
+    --tail=100
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: minio_bucket_init_logs
+  changed_when: false
+
 - name: Apply Data API deployment
   ansible.builtin.command: >
     kubectl apply -f {{ data_platform_remote_manifest_dir }}/data-api-deployment.yaml
@@ -246,3 +380,4 @@
     msg:
       - "{{ data_platform_resources.stdout_lines }}"
       - "{{ data_platform_pvcs.stdout_lines }}"
+      - "{{ minio_bucket_init_logs.stdout_lines }}"

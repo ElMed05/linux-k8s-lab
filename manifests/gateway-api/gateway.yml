@@ -29,3 +29,11 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
+
+    - name: minio-http
+      protocol: HTTP
+      port: 80
+      hostname: minio.data.local
+      allowedRoutes:
+        namespaces:
+          from: All

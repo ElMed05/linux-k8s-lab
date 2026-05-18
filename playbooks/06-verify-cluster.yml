@@ -203,6 +203,60 @@
       register: incidents_count
       changed_when: false
 
+    - name: Check MinIO console through Gateway API
+      ansible.builtin.command: >
+        curl -I -s -H "Host: minio.data.local"
+        http://192.168.0.173:31977
+      register: minio_gateway_health
+      changed_when: false
+
+    - name: Check MinIO buckets
+      ansible.builtin.shell: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf run mc-verify-buckets
+        -n data-platform
+        --rm -i
+        --restart=Never
+        --image=minio/mc
+        --env="MINIO_ROOT_USER=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf get secret minio-secret -n data-platform -o jsonpath={.data.MINIO_ROOT_USER} | base64 -d)"
+        --env="MINIO_ROOT_PASSWORD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf get secret minio-secret -n data-platform -o jsonpath={.data.MINIO_ROOT_PASSWORD} | base64 -d)"
+        --command -- /bin/sh -c
+        "mc alias set local http://minio-api:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD &&
+        mc ls local"
+      register: minio_buckets
+      changed_when: false
+
+    - name: Check MinIO raw metrics objects
+      ansible.builtin.shell: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf run mc-verify-raw-metrics
+        -n data-platform
+        --rm -i
+        --restart=Never
+        --image=minio/mc
+        --env="MINIO_ROOT_USER=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf get secret minio-secret -n data-platform -o jsonpath={.data.MINIO_ROOT_USER} | base64 -d)"
+        --env="MINIO_ROOT_PASSWORD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf get secret minio-secret -n data-platform -o jsonpath={.data.MINIO_ROOT_PASSWORD} | base64 -d)"
+        --command -- /bin/sh -c
+        "mc alias set local http://minio-api:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD &&
+        mc find local/raw/metrics --maxdepth 10 | head -n 10"
+      register: minio_raw_metrics
+      changed_when: false
+      failed_when: false
+
+    - name: Check MinIO raw incidents objects
+      ansible.builtin.shell: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf run mc-verify-raw-incidents
+        -n data-platform
+        --rm -i
+        --restart=Never
+        --image=minio/mc
+        --env="MINIO_ROOT_USER=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf get secret minio-secret -n data-platform -o jsonpath={.data.MINIO_ROOT_USER} | base64 -d)"
+        --env="MINIO_ROOT_PASSWORD=$(kubectl --kubeconfig=/etc/kubernetes/admin.conf get secret minio-secret -n data-platform -o jsonpath={.data.MINIO_ROOT_PASSWORD} | base64 -d)"
+        --command -- /bin/sh -c
+        "mc alias set local http://minio-api:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD &&
+        mc find local/raw/incidents --maxdepth 10 | head -n 10"
+      register: minio_raw_incidents
+      changed_when: false
+      failed_when: false
+
     - name: Show verification result
       ansible.builtin.debug:
         msg:
@@ -234,3 +288,9 @@
           - "{{ data_platform_tables.stdout_lines }}"
           - "service_metrics count: {{ service_metrics_count.stdout | trim }}"
           - "incidents count: {{ incidents_count.stdout | trim }}"
+          - "{{ minio_gateway_health.stdout_lines }}"
+          - "{{ minio_buckets.stdout_lines }}"
+          - "MinIO raw metrics sample:"
+          - "{{ minio_raw_metrics.stdout_lines }}"
+          - "MinIO raw incidents sample:"
+          - "{{ minio_raw_incidents.stdout_lines }}"

@@ -1,12 +1,27 @@
 from fastapi import FastAPI, HTTPException
+
 from app.database import get_connection, init_db
 from app.models import ServiceCreate, MetricCreate, IncidentCreate
+from app.object_storage import upload_raw_event
+
 
 app = FastAPI(
     title="Data Platform API",
     description="Ingestion API for service operations and platform intelligence data.",
-    version="0.1.0",
+    version="0.2.0",
 )
+
+
+def payload_to_dict(payload):
+    """
+    Supports Pydantic v1 and v2.
+
+    Pydantic v2: model_dump(mode="json")
+    Pydantic v1: dict()
+    """
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump(mode="json")
+    return payload.dict()
 
 
 @app.on_event("startup")
@@ -45,6 +60,11 @@ def create_service(payload: ServiceCreate):
         service = cur.fetchone()
         conn.commit()
         return service
+
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
+
     finally:
         cur.close()
         conn.close()
@@ -58,6 +78,10 @@ def list_services():
     try:
         cur.execute("SELECT * FROM services ORDER BY service_name;")
         return cur.fetchall()
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
     finally:
         cur.close()
         conn.close()
@@ -67,6 +91,8 @@ def list_services():
 def create_metric(payload: MetricCreate):
     conn = get_connection()
     cur = conn.cursor()
+
+    payload_dict = payload_to_dict(payload)
 
     try:
         cur.execute(
@@ -95,7 +121,22 @@ def create_metric(payload: MetricCreate):
         )
         metric = cur.fetchone()
         conn.commit()
-        return metric
+
+        raw_object_path = upload_raw_event("metrics", payload_dict)
+
+        return {
+            "status": "created",
+            "stored_in": {
+                "postgres": True,
+                "minio_raw_object": raw_object_path,
+            },
+            "record": metric,
+        }
+
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
+
     finally:
         cur.close()
         conn.close()
@@ -105,6 +146,8 @@ def create_metric(payload: MetricCreate):
 def create_incident(payload: IncidentCreate):
     conn = get_connection()
     cur = conn.cursor()
+
+    payload_dict = payload_to_dict(payload)
 
     try:
         cur.execute(
@@ -131,7 +174,22 @@ def create_incident(payload: IncidentCreate):
         )
         incident = cur.fetchone()
         conn.commit()
-        return incident
+
+        raw_object_path = upload_raw_event("incidents", payload_dict)
+
+        return {
+            "status": "created",
+            "stored_in": {
+                "postgres": True,
+                "minio_raw_object": raw_object_path,
+            },
+            "record": incident,
+        }
+
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(exc))
+
     finally:
         cur.close()
         conn.close()
@@ -159,6 +217,10 @@ def metrics_summary():
             """
         )
         return cur.fetchall()
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
     finally:
         cur.close()
         conn.close()
@@ -183,6 +245,10 @@ def incidents_summary():
             """
         )
         return cur.fetchall()
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
     finally:
         cur.close()
         conn.close()

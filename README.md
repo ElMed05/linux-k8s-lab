@@ -1,10 +1,41 @@
-# Linux Kubernetes Lab mit Ansible, Helm, Ingress, TLS und Gateway API
+# Linux Kubernetes Lab mit Ansible, Helm, Ingress, TLS, Gateway API und Data Platform
 
 Dieses Projekt baut ein praxisnahes Kubernetes-Lab auf Basis von Ubuntu Server VMs in VMware Workstation auf.
 
-Ziel ist es, Kubernetes, Linux-Server-Administration, Ansible-Automatisierung und typische Plattform-Komponenten realistisch zu lernen — nicht nur mit Minikube, sondern mit echten Linux-Servern, kubeadm, containerd, Helm, Ingress, TLS und Gateway API.
+Der Fokus liegt nicht nur auf einer Kubernetes-Installation, sondern auf einem nachvollziehbaren Plattform-Betriebsmodell: Linux-Server werden automatisiert vorbereitet, ein Multi-Node-Kubernetes-Cluster wird mit Ansible aufgebaut, Plattform-Komponenten werden über Rollen verwaltet und darauf läuft inzwischen eine kleine Data Intelligence Platform.
 
-Das Lab besteht aktuell aus einem Multi-Node Kubernetes Cluster mit einem Control-Plane-Node und einem Worker-Node.
+Das Lab ist damit eine kompakte **Platform Engineering Foundation** mit Richtung **Data Platform, Lakehouse und MLOps**.
+
+---
+
+## Kurzüberblick
+
+Aktuell umfasst das Projekt:
+
+```text
+VMware Workstation
+├── k8s-master-01
+│   └── Kubernetes Control Plane
+│
+└── k8s-worker-01
+    └── Worker Node
+
+Plattform-Komponenten
+├── containerd
+├── kubeadm / kubelet / kubectl
+├── Flannel CNI
+├── Helm
+├── ingress-nginx
+├── cert-manager
+├── Gateway API
+└── NGINX Gateway Fabric
+
+Data Platform
+├── data-generator CronJob
+├── data-api FastAPI Service
+├── PostgreSQL mit PersistentVolume
+└── Metabase Dashboard
+```
 
 ---
 
@@ -18,6 +49,7 @@ Control-Rechner
     ├── Ansible Rollen
     ├── Ansible Vault
     ├── versionierte Kubernetes-Manifeste
+    ├── Data Platform App-Code
     └── SSH-Key Zugriff
              │
              │ verwaltet per SSH/Ansible
@@ -42,14 +74,120 @@ VMware Workstation
     ├── kubelet
     ├── kube-proxy
     ├── containerd
-    └── Flannel CNI
+    ├── Flannel CNI
+    ├── Gateway/Data-Plane Pods
+    ├── Data API
+    ├── PostgreSQL
+    └── Metabase
 ```
 
 ---
 
-## App-Zugriffsarchitektur
+## Data Platform Architektur
 
-Die Demo-Anwendung läuft intern im Cluster als `ClusterIP` Service. Sie wird über zwei unterschiedliche Kubernetes-Networking-Modelle veröffentlicht:
+Die Data Platform bildet eine kleine, aber realistische Pipeline ab:
+
+```text
+Kubernetes CronJob
+        │
+        ▼
+data-generator
+        │
+        │ sendet JSON Events
+        ▼
+data-api FastAPI
+        │
+        │ schreibt strukturierte Daten
+        ▼
+PostgreSQL
+        │
+        │ wird als Datenquelle genutzt von
+        ▼
+Metabase Dashboard
+```
+
+### Datenfluss
+
+```text
+data-generator
+→ POST /services
+→ POST /metrics
+→ POST /incidents
+→ data-api
+→ PostgreSQL
+→ Metabase Dashboard
+```
+
+### Data Platform Komponenten
+
+| Komponente | Zweck |
+|---|---|
+| `data-generator` | Kubernetes CronJob, erzeugt regelmäßig Service-Metriken und Incidents |
+| `data-api` | FastAPI Ingestion API für Betriebsdaten |
+| `postgres` | Persistente Speicherung der Data Platform Daten |
+| `metabase` | Dashboard- und BI-Oberfläche |
+| `ghcr-secret` | Kubernetes Image Pull Secret für private GHCR Images |
+| `postgres-local-pv` | Lokales PersistentVolume für PostgreSQL |
+| `data-api-route` | Gateway API Route für die Data API |
+| `metabase-route` | Gateway API Route für das Dashboard |
+
+### Data Platform Datenmodell
+
+Die API erstellt beim Start automatisch diese Tabellen:
+
+```text
+services
+service_metrics
+incidents
+```
+
+Beispielhafte Inhalte:
+
+```text
+services
+├── checkout-api
+├── payment-api
+├── inventory-service
+├── user-service
+└── notification-service
+
+service_metrics
+├── cpu_usage
+├── memory_usage
+├── response_time_ms
+├── request_count
+└── error_rate
+
+incidents
+├── severity
+├── incident_type
+├── duration_minutes
+└── resolved
+```
+
+### Data Platform Routing
+
+```text
+api.data.local:31977
+→ NGINX Gateway Fabric
+→ Gateway demo-gateway
+→ HTTPRoute data-api-route
+→ Service data-api
+→ FastAPI Pod
+
+dashboard.data.local:31977
+→ NGINX Gateway Fabric
+→ Gateway demo-gateway
+→ HTTPRoute metabase-route
+→ Service metabase
+→ Metabase Pod
+```
+
+---
+
+## Networking-Architektur
+
+Die Demo-App und die Data Platform werden über zwei unterschiedliche Kubernetes-Networking-Modelle veröffentlicht:
 
 ```text
 1. Klassisch über ingress-nginx und Ingress
@@ -60,7 +198,7 @@ Die Demo-Anwendung läuft intern im Cluster als `ClusterIP` Service. Sie wird ü
 
 ```text
 Browser / curl
-→ demo.local:32685
+→ demo.local:30520 / 32685
 → ingress-nginx-controller NodePort
 → Ingress Rule für demo.local
 → demo-nginx ClusterIP Service
@@ -75,14 +213,11 @@ http://demo.local:30520
 
 HTTPS:
 https://demo.local:32685
-http://gateway.demo.local:31977
 ```
 
 Da aktuell ein Self-Signed-Zertifikat genutzt wird, zeigt der Browser bei HTTPS eine Zertifikatswarnung.
 
 ### Zugriff über Gateway API
-
-Zusätzlich ist die Demo-Anwendung über Gateway API erreichbar.
 
 ```text
 Browser / curl
@@ -94,23 +229,17 @@ Browser / curl
 → demo-nginx Pod
 ```
 
-Aktueller Gateway-API-Zugriff:
+Zusätzlich routet derselbe Gateway auch die Data Platform:
 
 ```text
-HTTP:
-http://gateway.demo.local:31977
+api.data.local:31977
+dashboard.data.local:31977
 ```
 
 Wichtig: Der Gateway-Service nutzt aktuell `externalTrafficPolicy: Local`. Deshalb funktioniert der NodePort-Zugriff über den Worker-Node, auf dem der Gateway-Pod läuft:
 
 ```text
 k8s-worker-01 / 192.168.0.173
-```
-
-Test:
-
-```bash
-curl -H "Host: gateway.demo.local" http://192.168.0.173:31977
 ```
 
 ---
@@ -123,33 +252,33 @@ curl -H "Host: gateway.demo.local" http://192.168.0.173:31977
 - Worker Node: `k8s-worker-01`
 - SSH-Key-basierter Zugriff
 - Ansible Inventory und Playbooks
-- Ansible Vault für sudo-Zugangsdaten
-- Zentrales `site.yml` Playbook für den kompletten Lab-Aufbau
+- Ansible Vault für sudo-Zugangsdaten und GHCR Token
+- Zentrales `site.yml` Playbook für den Cluster-Aufbau
 - Ansible-Rollenstruktur für wiederverwendbare Automatisierung
-- Idempotente Playbooks: erneuter Lauf endet mit `changed=0`
-- Kubernetes-Manifeste versioniert im Repository unter `manifests/`
+- Idempotente Playbooks: erneuter Lauf endet im Zielzustand mit `changed=0`
+- Kubernetes-Manifeste versioniert im Repository
 - containerd als Container Runtime
 - Kubernetes v1.36 mit kubeadm
 - Flannel als CNI
 - Helm installiert
 - Demo-App `nginx` per Helm deployed
-- Demo-App Service als `ClusterIP`
 - ingress-nginx als Ingress Controller
-- Routing über `demo.local`
 - cert-manager installiert
 - Self-Signed TLS-Zertifikat für `demo.local`
-- HTTPS Zugriff über Ingress
 - Gateway API CRDs installiert
 - NGINX Gateway Fabric als Gateway API Controller installiert
-- GatewayClass `nginx` vorhanden und accepted
-- Gateway `demo-gateway` programmiert und aktiv
+- GatewayClass `nginx` accepted
+- Gateway `demo-gateway` programmed
 - HTTPRoute `demo-nginx-route` für `gateway.demo.local`
-- Demo-App zusätzlich über Gateway API erreichbar
-- Verify-Playbook zur Cluster-Prüfung
+- Data Platform Namespace `data-platform`
+- PostgreSQL mit lokalem PersistentVolume
+- FastAPI Data API als eigenes Container Image aus GHCR
+- Data Generator CronJob als eigenes Container Image aus GHCR
+- Metabase Dashboard für Data Platform Daten
+- Gateway API Routes für `api.data.local` und `dashboard.data.local`
+- Verify-Playbook prüft Kubernetes, Gateway API und Data Platform Health
 - Worker-Join-Playbook ist idempotent
 - kubeadm Join Tokens werden nur erzeugt, wenn Worker noch nicht gejoint sind
-- Keine offenen kubeadm Join Tokens nach erfolgreichem Join nötig
-- `site.yml` läuft idempotent mit `changed=0`
 
 ---
 
@@ -192,6 +321,18 @@ Gateway API
 NGINX Gateway Fabric
 ```
 
+### Data Platform Komponenten
+
+```text
+PostgreSQL
+FastAPI data-api
+data-generator CronJob
+Metabase
+GHCR imagePullSecret
+Local PersistentVolume
+Gateway API HTTPRoutes
+```
+
 ---
 
 ## Projektstruktur
@@ -204,12 +345,43 @@ linux-k8s-lab/
 │   └── lab/
 │       ├── hosts.ini
 │       ├── group_vars/
-│       │   └── all.yml
+│       │   └── all/
+│       │       └── vault-ghcr.yml
 │       └── host_vars/
 │           ├── k8s-master-01/
 │           │   └── vault.yml
 │           └── k8s-worker-01/
 │               └── vault.yml
+├── apps/
+│   └── data-platform/
+│       ├── data-api/
+│       │   ├── Dockerfile
+│       │   ├── requirements.txt
+│       │   └── app/
+│       │       ├── __init__.py
+│       │       ├── database.py
+│       │       ├── main.py
+│       │       └── models.py
+│       ├── data-generator/
+│       │   ├── Dockerfile
+│       │   ├── requirements.txt
+│       │   └── generator.py
+│       ├── k8s/
+│       │   ├── namespace.yaml
+│       │   ├── postgres-secret.yaml
+│       │   ├── postgres-pv.yaml
+│       │   ├── postgres-pvc.yaml
+│       │   ├── postgres-deployment.yaml
+│       │   ├── postgres-service.yaml
+│       │   ├── data-api-deployment.yaml
+│       │   ├── data-api-service.yaml
+│       │   ├── data-api-httproute.yaml
+│       │   ├── data-generator-cronjob.yaml
+│       │   ├── metabase-db-init-job.yaml
+│       │   ├── metabase-deployment.yaml
+│       │   ├── metabase-service.yaml
+│       │   └── metabase-httproute.yaml
+│       └── docs/
 ├── manifests/
 │   ├── cert-manager/
 │   │   ├── demo-certificate.yml
@@ -235,11 +407,13 @@ linux-k8s-lab/
 │   ├── 11-create-demo-ingress.yml
 │   ├── 12-install-cert-manager.yml
 │   ├── 13-create-demo-tls.yml
-│   └── 14-install-gateway-api.yml
+│   ├── 14-install-gateway-api.yml
+│   └── 15-deploy-data-platform.yml
 ├── roles/
 │   ├── base_linux/
 │   ├── cert_manager/
 │   ├── containerd/
+│   ├── data_platform/
 │   ├── demo_app/
 │   ├── demo_ingress/
 │   ├── demo_tls/
@@ -280,26 +454,13 @@ roles/
 │   └── cert-manager Installation per Helm inklusive CRDs
 ├── demo_ingress/
 │   └── Demo Ingress Resource für demo.local
-└── demo_tls/
-    └── SelfSigned ClusterIssuer, Certificate und TLS Binding
+├── demo_tls/
+│   └── SelfSigned ClusterIssuer, Certificate und TLS Binding
+├── gateway_api/
+│   └── Gateway API CRDs, NGINX Gateway Fabric, Gateway und HTTPRoute
+└── data_platform/
+    └── PostgreSQL, Data API, CronJob Generator, Metabase und Gateway Routes
 ```
-
-Die Playbooks bleiben als klare Einstiegspunkte erhalten, rufen aber größtenteils nur noch die jeweiligen Rollen auf.
-
-Beispiel:
-
-```yaml
----
-- name: Configure base Linux settings
-  hosts: all
-  become: true
-  gather_facts: true
-
-  roles:
-    - base_linux
-```
-
-Dadurch bleibt die Automatisierung wartbarer, wiederverwendbarer und näher an einer professionellen Ansible-Struktur.
 
 ---
 
@@ -323,20 +484,22 @@ k8s_workers
 
 ## Ansible Vault
 
-Sudo-Passwörter werden nicht im Klartext im Repository gespeichert, sondern über Ansible Vault verschlüsselt.
+Sudo-Passwörter und GHCR-Zugangsdaten werden nicht im Klartext im Repository gespeichert, sondern über Ansible Vault verschlüsselt.
 
 Beispielstruktur:
 
 ```text
 inventories/lab/host_vars/k8s-master-01/vault.yml
 inventories/lab/host_vars/k8s-worker-01/vault.yml
+inventories/lab/group_vars/all/vault-ghcr.yml
 ```
 
-Beispielinhalt vor Verschlüsselung:
+GHCR-Zugangsdaten vor Verschlüsselung:
 
 ```yaml
 ---
-ansible_become_password: "SUDO_PASSWORD"
+ghcr_username: "GITHUB_USERNAME"
+ghcr_token: "GITHUB_TOKEN_WITH_READ_PACKAGES"
 ```
 
 Ausführen mit Vault:
@@ -349,221 +512,54 @@ ansible-playbook playbooks/06-verify-cluster.yml --ask-vault-pass
 
 ## Playbook-Reihenfolge
 
-Der komplette Lab-Aufbau kann über ein zentrales Playbook ausgeführt werden:
+Der komplette Cluster-Aufbau kann über ein zentrales Playbook ausgeführt werden:
 
 ```bash
 ansible-playbook playbooks/site.yml --ask-vault-pass
 ```
 
-Dieses Playbook ruft die einzelnen Schritte in der richtigen Reihenfolge auf.
-
-Ein erneuter Lauf sollte im Zielzustand ohne Änderungen enden:
-
-```text
-changed=0
-failed=0
-unreachable=0
-```
-
-Alternativ können die einzelnen Playbooks weiterhin separat ausgeführt werden.
-
-### 1. Verbindung testen
+Einzelne Playbooks können separat ausgeführt werden.
 
 ```bash
 ansible-playbook playbooks/00-ping.yml
-```
-
-### 2. Server für Ansible vorbereiten
-
-```bash
 ansible-playbook playbooks/01-bootstrap.yml --ask-vault-pass
-```
-
-### 3. Linux-Basiskonfiguration
-
-```bash
 ansible-playbook playbooks/02-base-linux.yml --ask-vault-pass
-```
-
-Dieses Playbook ruft die Rolle `base_linux` auf und setzt unter anderem:
-
-```text
-Basis-Pakete
-Timezone
-Hostname
-/etc/hosts
-Swap deaktivieren
-```
-
-### 4. Container Runtime installieren
-
-```bash
 ansible-playbook playbooks/03-container-runtime.yml --ask-vault-pass
-```
-
-Dieses Playbook ruft die Rolle `containerd` auf und installiert bzw. konfiguriert:
-
-```text
-containerd
-overlay Kernel-Modul
-br_netfilter Kernel-Modul
-sysctl Settings für Kubernetes Networking
-SystemdCgroup für containerd
-```
-
-### 5. Kubernetes-Pakete installieren
-
-```bash
 ansible-playbook playbooks/04-kubernetes-packages.yml --ask-vault-pass
-```
-
-Dieses Playbook ruft die Rolle `kubernetes_common` auf und installiert:
-
-```text
-kubeadm
-kubelet
-kubectl
-```
-
-### 6. Control Plane initialisieren
-
-```bash
 ansible-playbook playbooks/05-init-control-plane.yml --ask-vault-pass
-```
-
-Dieses Playbook ruft die Rolle `kubernetes_control_plane` auf, führt `kubeadm init` aus, richtet die kubeconfig ein und installiert Flannel als CNI.
-
-### 7. Helm installieren
-
-```bash
 ansible-playbook playbooks/07-install-helm.yml --ask-vault-pass
-```
-
-Dieses Playbook ruft die Rolle `helm` auf.
-
-### 8. Worker Nodes joinen
-
-```bash
 ansible-playbook playbooks/09-join-workers.yml --ask-vault-pass
-```
-
-Das Join-Playbook nutzt die Rolle `kubernetes_worker` und ist idempotent:
-
-- Es prüft zuerst, ob Worker bereits gejoint sind.
-- Es erzeugt nur dann einen kubeadm Join Token, wenn ein Worker noch nicht Teil des Clusters ist.
-- Der Join Token wird nicht im Terminal ausgegeben.
-- Bereits gejointe Worker werden übersprungen.
-
-### 9. Demo-App deployen
-
-```bash
 ansible-playbook playbooks/08-deploy-test-app.yml --ask-vault-pass
-```
-
-Dieses Playbook ruft die Rolle `demo_app` auf.
-
-Die Demo-App wird per Helm installiert:
-
-```text
-Namespace: demo
-Release: demo-nginx
-Service Type: ClusterIP
-```
-
-Die App ist bewusst nicht direkt per NodePort veröffentlicht, sondern wird über Ingress erreichbar gemacht.
-
-### 10. ingress-nginx installieren
-
-```bash
 ansible-playbook playbooks/10-install-ingress-nginx.yml --ask-vault-pass
-```
-
-Dieses Playbook ruft die Rolle `ingress_nginx` auf.
-
-Installiert den Ingress Controller per Helm:
-
-```text
-Namespace: ingress-nginx
-IngressClass: nginx
-Service Type: NodePort
-HTTP NodePort: 30520
-HTTPS NodePort: 32685
-```
-
-### 11. Demo-Ingress erstellen
-
-```bash
 ansible-playbook playbooks/11-create-demo-ingress.yml --ask-vault-pass
-```
-
-Dieses Playbook ruft die Rolle `demo_ingress` auf.
-
-Erstellt eine Ingress Resource für:
-
-```text
-Host: demo.local
-Service: demo-nginx
-Port: 80
-TLS Secret: demo-local-tls
-```
-
-### 12. cert-manager installieren
-
-```bash
 ansible-playbook playbooks/12-install-cert-manager.yml --ask-vault-pass
-```
-
-Dieses Playbook ruft die Rolle `cert_manager` auf.
-
-Installiert:
-
-```text
-cert-manager
-cert-manager-cainjector
-cert-manager-webhook
-cert-manager CRDs
-```
-
-### 13. TLS für Demo-Ingress erstellen
-
-```bash
 ansible-playbook playbooks/13-create-demo-tls.yml --ask-vault-pass
-```
-
-Dieses Playbook ruft die Rolle `demo_tls` auf.
-
-Erstellt:
-
-```text
-SelfSigned ClusterIssuer
-Certificate für demo.local
-TLS Secret demo-local-tls
-Ingress TLS Binding
-```
-
-### 14. Gateway API installieren und konfigurieren
-
-```bash
 ansible-playbook playbooks/14-install-gateway-api.yml --ask-vault-pass
+ansible-playbook playbooks/15-deploy-data-platform.yml --ask-vault-pass
+ansible-playbook playbooks/06-verify-cluster.yml --ask-vault-pass
 ```
 
-Dieses Playbook ruft die Rolle `gateway_api` auf.
-
-Erstellt und prüft:
-
-```text
-Gateway API CRDs
-NGINX Gateway Fabric
-GatewayClass nginx
-Gateway demo-gateway
-HTTPRoute demo-nginx-route
-Gateway NodePort Service
-```
-
-### 15. Cluster prüfen
+### Data Platform Deployment
 
 ```bash
-ansible-playbook playbooks/06-verify-cluster.yml --ask-vault-pass
+ansible-playbook playbooks/15-deploy-data-platform.yml --ask-vault-pass
+```
+
+Dieses Playbook deployt:
+
+```text
+Namespace data-platform
+GHCR imagePullSecret
+PostgreSQL Secret
+Local PersistentVolume
+PostgreSQL PVC
+PostgreSQL Deployment + Service
+Data API Deployment + Service
+Data API HTTPRoute
+Data Generator CronJob
+Metabase DB Init Job
+Metabase Deployment + Service
+Metabase HTTPRoute
 ```
 
 ---
@@ -590,20 +586,45 @@ GatewayClass
 Gateway
 HTTPRoute
 Gateway NodePort Service
+Data Platform Pods
+Data Platform Services
+Data Platform PVCs
+Data Generator CronJob
+Data Platform Jobs
+Data API Health über Gateway API
+Metabase Health über Gateway API
+PostgreSQL Tabellen
+service_metrics Record Count
+incidents Record Count
 ```
 
 Erwarteter Zustand:
 
 ```text
-k8s-master-01   Ready
-k8s-worker-01   Ready
-demo-nginx      Running
-ingress-nginx   Running
-cert-manager    Running
-demo-local-tls  Ready=True
-gatewayclass   nginx Accepted=True
-demo-gateway   Programmed=True
-demo-nginx-route vorhanden
+k8s-master-01       Ready
+k8s-worker-01       Ready
+demo-nginx          Running
+ingress-nginx       Running
+cert-manager        Running
+demo-local-tls      Ready=True
+gatewayclass nginx  Accepted=True
+demo-gateway        Programmed=True
+data-api            Running
+postgres            Running
+metabase            Running
+data-generator      CronJob vorhanden
+postgres-data       Bound
+api.data.local      erreichbar
+dashboard.data.local erreichbar
+```
+
+Beispiel aus dem Verify-Output:
+
+```text
+Data API Gateway Health: {"status":"healthy","service":"data-api"}
+HTTP/1.1 200 OK
+service_metrics count: 310
+incidents count: 64
 ```
 
 ---
@@ -614,20 +635,20 @@ Ein wichtiger Fokus dieses Labs ist Idempotenz.
 
 Das bedeutet: Wenn der gewünschte Zustand bereits vorhanden ist, verändert Ansible nichts mehr.
 
-Der zentrale Test dafür ist:
-
 ```bash
 ansible-playbook playbooks/site.yml --ask-vault-pass
+ansible-playbook playbooks/14-install-gateway-api.yml --ask-vault-pass
+ansible-playbook playbooks/15-deploy-data-platform.yml --ask-vault-pass
+ansible-playbook playbooks/06-verify-cluster.yml --ask-vault-pass
 ```
 
 Erwarteter Zustand bei erneutem Lauf:
 
 ```text
-k8s-master-01   changed=0   failed=0   unreachable=0
-k8s-worker-01   changed=0   failed=0   unreachable=0
+changed=0
+failed=0
+unreachable=0
 ```
-
-Damit ist das Lab nicht nur manuell aufgebaut, sondern reproduzierbar und kontrolliert automatisiert.
 
 ---
 
@@ -637,73 +658,69 @@ Damit ist das Lab nicht nur manuell aufgebaut, sondern reproduzierbar und kontro
 
 ```bash
 curl -H "Host: demo.local" http://192.168.0.202:30520
-```
-
-Alternativ über den Worker:
-
-```bash
 curl -H "Host: demo.local" http://192.168.0.173:30520
 ```
 
 ### HTTPS über Ingress
 
-Wenn `demo.local` in der lokalen hosts-Datei gesetzt ist:
-
 ```bash
 curl -k https://demo.local:32685
-http://gateway.demo.local:31977
-```
-
-Alternativ ohne hosts-Datei:
-
-```bash
 curl -k --resolve demo.local:32685:192.168.0.202 https://demo.local:32685
-http://gateway.demo.local:31977
 ```
 
----
-
-## Zugriff über Gateway API
-
-Gateway API läuft parallel zum bestehenden Ingress-Setup.
-
-Aktueller Zugriff:
+### HTTP über Gateway API
 
 ```bash
 curl -H "Host: gateway.demo.local" http://192.168.0.173:31977
 ```
 
+---
+
+## Zugriff auf die Data Platform
+
+### Data API
+
+```bash
+curl -H "Host: api.data.local" http://192.168.0.173:31977/health
+```
+
 Erwartung:
 
-```text
-HTTP/1.1 200 OK
-Welcome to nginx!
+```json
+{"status":"healthy","service":"data-api"}
 ```
 
-Der Gateway-Service nutzt aktuell:
+### Metabase Dashboard
 
 ```text
-externalTrafficPolicy: Local
+http://dashboard.data.local:31977
 ```
 
-Deshalb funktioniert der externe NodePort-Zugriff aktuell über den Worker-Node `192.168.0.173`, weil dort der Gateway-Pod läuft.
-
-Wichtige Ressourcen:
+Metabase verbindet sich mit PostgreSQL:
 
 ```text
-Namespace: nginx-gateway
-GatewayClass: nginx
-Gateway: demo-gateway
-HTTPRoute: demo-nginx-route
-Hostname: gateway.demo.local
-NodePort: 31977
+Host: postgres
+Port: 5432
+Database: dataplatform
+Username: dataplatform
+Password: dataplatform
+```
+
+Dashboard-Ideen:
+
+```text
+Metric Events by Service
+Average Response Time by Service
+Average Error Rate by Service
+Incidents by Severity
+Service Health Score
 ```
 
 ---
 
 ## Windows hosts-Datei
 
-Für den Browser-Test unter Windows müssen `demo.local` und optional `gateway.demo.local` lokal auf Kubernetes Nodes zeigen.
+Für den Browser-Test unter Windows müssen die Hostnames lokal auf den Worker-Node zeigen.
 
 Datei als Administrator öffnen:
 
@@ -711,11 +728,13 @@ Datei als Administrator öffnen:
 C:\Windows\System32\drivers\etc\hosts
 ```
 
-Eintrag:
+Einträge:
 
 ```text
 192.168.0.202 demo.local
 192.168.0.173 gateway.demo.local
+192.168.0.173 api.data.local
+192.168.0.173 dashboard.data.local
 ```
 
 Danach im Browser:
@@ -724,164 +743,96 @@ Danach im Browser:
 http://demo.local:30520
 https://demo.local:32685
 http://gateway.demo.local:31977
+http://api.data.local:31977/health
+http://dashboard.data.local:31977
 ```
 
-Bei HTTPS erscheint wegen des Self-Signed-Zertifikats eine Zertifikatswarnung.
+---
+
+## Container Images
+
+Eigene Images werden in GitHub Container Registry veröffentlicht:
+
+```text
+ghcr.io/elmed05/data-platform-api:0.1.0
+ghcr.io/elmed05/data-generator:0.1.0
+```
+
+Kubernetes zieht diese Images über ein Image Pull Secret:
+
+```text
+Secret: ghcr-secret
+Namespace: data-platform
+```
+
+Das Secret wird über Ansible aus Vault-Daten erzeugt.
+
+---
+
+## Storage
+
+PostgreSQL nutzt ein lokales PersistentVolume auf dem Worker-Node.
+
+```text
+Node: k8s-worker-01
+Pfad: /mnt/data-platform/postgres
+PV: postgres-local-pv
+PVC: postgres-data
+StorageClass: local-storage
+Access Mode: ReadWriteOnce
+```
+
+Der Storage ist bewusst einfach gehalten, aber persistent und nachvollziehbar.
+
+Für produktionsähnlichere Setups wären später möglich:
+
+```text
+Longhorn
+OpenEBS
+NFS Provisioner
+Ceph/Rook
+Cloud Block Storage
+```
 
 ---
 
 ## Wichtige Kubernetes-Konzepte in diesem Lab
 
-### Deployment
-
-Das Deployment verwaltet die gewünschte Anzahl an Pods.
-
-Beispiel:
-
 ```text
-demo-nginx Deployment
-→ erzeugt ReplicaSet
-→ erzeugt Pod
-```
-
-### ReplicaSet
-
-Das ReplicaSet sorgt dafür, dass die gewünschte Anzahl an Pods läuft.
-
-### Pod
-
-Der Pod ist die kleinste ausführbare Einheit in Kubernetes.
-
-In diesem Lab läuft darin ein nginx Container.
-
-### Service
-
-Ein Service stellt eine stabile Adresse für Pods bereit.
-
-Die Demo-App nutzt:
-
-```text
+Deployment
+ReplicaSet
+Pod
+Service
 ClusterIP
+NodePort
+PersistentVolume
+PersistentVolumeClaim
+CronJob
+Secret
+Ingress
+IngressClass
+Gateway API
+GatewayClass
+Gateway
+HTTPRoute
+cert-manager
+Certificate
+TLS Secret
 ```
 
-Dadurch ist sie nur intern im Cluster erreichbar.
-
-### NodePort
-
-NodePort wird aktuell nur für den Ingress Controller genutzt.
-
-Dadurch kann Traffic von außen in den Cluster gelangen.
-
-### Ingress
-
-Ingress definiert HTTP/HTTPS-Routing-Regeln.
-
-Beispiel:
+Aktuelle Gateway API Hostnames:
 
 ```text
-demo.local
-→ demo-nginx Service
+gateway.demo.local     → demo-nginx
+api.data.local         → data-api
+dashboard.data.local   → metabase
 ```
-
-### Ingress Controller
-
-Der ingress-nginx Controller setzt die Ingress-Regeln technisch um.
-
-Ohne Ingress Controller hätte eine Ingress Resource keine Wirkung.
-
-### IngressClass
-
-Die IngressClass verbindet eine Ingress Resource mit einem konkreten Controller.
-
-In diesem Lab:
-
-```text
-ingressClassName: nginx
-```
-
-### Gateway API
-
-Gateway API ist ein moderneres Kubernetes-Networking-Modell als Ingress.
-
-In diesem Lab wird Gateway API zusätzlich zum bestehenden Ingress-Setup betrieben.
-
-### NGINX Gateway Fabric
-
-NGINX Gateway Fabric ist der Gateway API Controller in diesem Lab.
-
-Er setzt die Gateway API Ressourcen technisch um und erstellt den Gateway-Dataplane-Pod.
-
-### GatewayClass
-
-Die GatewayClass beschreibt, welcher Controller Gateway-Ressourcen verarbeitet.
-
-In diesem Lab:
-
-```text
-GatewayClass: nginx
-Controller: gateway.nginx.org/nginx-gateway-controller
-Accepted: True
-```
-
-### Gateway
-
-Das Gateway beschreibt den Einstiegspunkt für Traffic.
-
-In diesem Lab:
-
-```text
-Gateway: demo-gateway
-Namespace: nginx-gateway
-Hostname: gateway.demo.local
-Port: 80
-Programmed: True
-```
-
-### HTTPRoute
-
-Die HTTPRoute beschreibt die Routing-Regel von einem Hostnamen zu einem Backend-Service.
-
-In diesem Lab:
-
-```text
-HTTPRoute: demo-nginx-route
-Hostname: gateway.demo.local
-Backend: demo-nginx
-Port: 80
-```
-
-### cert-manager
-
-cert-manager erstellt und verwaltet Kubernetes-Zertifikate automatisch.
-
-In diesem Lab erstellt cert-manager ein Self-Signed-Zertifikat für `demo.local`.
-
-### Certificate
-
-Das Certificate beschreibt das gewünschte Zertifikat.
-
-```text
-Certificate: demo-local-tls
-DNS Name: demo.local
-Secret: demo-local-tls
-```
-
-### TLS Secret
-
-Das TLS Secret enthält Zertifikat und Private Key.
-
-```text
-Secret: demo-local-tls
-Type: kubernetes.io/tls
-```
-
-Der Ingress nutzt dieses Secret für HTTPS.
 
 ---
 
-## Typischer Traffic Flow
+## Typische Traffic Flows
 
-### HTTP
+### Demo-App über Ingress
 
 ```text
 Client
@@ -892,7 +843,7 @@ Client
 → demo-nginx Pod
 ```
 
-### HTTPS
+### Demo-App über HTTPS Ingress
 
 ```text
 Client
@@ -904,9 +855,7 @@ Client
 → demo-nginx Pod
 ```
 
-Intern im Cluster geht der Traffic aktuell per HTTP weiter.
-
-### Gateway API
+### Demo-App über Gateway API
 
 ```text
 Client
@@ -918,7 +867,31 @@ Client
 → demo-nginx Pod
 ```
 
-Auch hier bleibt der Backend-Service `demo-nginx` ein interner `ClusterIP` Service.
+### Data API über Gateway API
+
+```text
+Client
+→ api.data.local:31977
+→ demo-gateway-nginx NodePort
+→ Gateway demo-gateway
+→ HTTPRoute data-api-route
+→ data-api ClusterIP Service
+→ data-api Pod
+→ PostgreSQL
+```
+
+### Metabase über Gateway API
+
+```text
+Client
+→ dashboard.data.local:31977
+→ demo-gateway-nginx NodePort
+→ Gateway demo-gateway
+→ HTTPRoute metabase-route
+→ metabase ClusterIP Service
+→ Metabase Pod
+→ PostgreSQL
+```
 
 ---
 
@@ -949,23 +922,6 @@ kubectl get ingress -n demo
 kubectl describe ingress demo-nginx -n demo
 ```
 
-### Ingress Controller prüfen
-
-```bash
-kubectl get pods -n ingress-nginx -o wide
-kubectl get svc -n ingress-nginx
-kubectl get ingressclass
-```
-
-### cert-manager prüfen
-
-```bash
-kubectl get pods -n cert-manager -o wide
-kubectl get certificate -n demo
-kubectl describe certificate demo-local-tls -n demo
-kubectl get secret demo-local-tls -n demo
-```
-
 ### Gateway API prüfen
 
 ```bash
@@ -973,15 +929,45 @@ kubectl get pods -n nginx-gateway -o wide
 kubectl get svc -n nginx-gateway
 kubectl get gatewayclass
 kubectl get gateway -A
-kubectl get httproute -n demo
+kubectl get httproute -A
 kubectl describe gateway demo-gateway -n nginx-gateway
 kubectl describe httproute demo-nginx-route -n demo
+kubectl describe httproute data-api-route -n data-platform
+kubectl describe httproute metabase-route -n data-platform
 ```
 
-### kubeadm Tokens prüfen
+### Data Platform prüfen
 
 ```bash
-sudo kubeadm token list
+kubectl get all -n data-platform
+kubectl get pods -n data-platform -o wide
+kubectl get svc -n data-platform
+kubectl get pvc -n data-platform
+kubectl get cronjob -n data-platform
+kubectl get jobs -n data-platform
+```
+
+### PostgreSQL Tabellen prüfen
+
+```bash
+kubectl exec -n data-platform deploy/postgres -- \
+  psql -U dataplatform -d dataplatform -c '\dt'
+```
+
+### Anzahl der Metriken prüfen
+
+```bash
+kubectl exec -n data-platform deploy/postgres -- \
+  psql -U dataplatform -d dataplatform \
+  -c 'SELECT service_name, COUNT(*) FROM service_metrics GROUP BY service_name ORDER BY service_name;'
+```
+
+### Incidents prüfen
+
+```bash
+kubectl exec -n data-platform deploy/postgres -- \
+  psql -U dataplatform -d dataplatform \
+  -c 'SELECT service_name, severity, COUNT(*) FROM incidents GROUP BY service_name, severity ORDER BY service_name;'
 ```
 
 ---
@@ -990,12 +976,16 @@ sudo kubeadm token list
 
 - SSH-Zugriff läuft per SSH-Key.
 - sudo-Passwörter werden mit Ansible Vault verwaltet.
+- GHCR Token wird mit Ansible Vault verwaltet.
 - kubeadm Join Tokens werden nicht dauerhaft benötigt.
 - Das Join-Playbook erzeugt nur dann neue Tokens, wenn Worker noch nicht gejoint sind.
 - Join Tokens werden nicht im Ansible Output angezeigt.
 - Das aktuelle TLS-Zertifikat ist Self-Signed und nur für das lokale Lab gedacht.
 - Für produktionsähnliche Umgebungen wären eine interne CA, ACME oder Let’s Encrypt sinnvoll.
 - Der Gateway API NodePort nutzt aktuell `externalTrafficPolicy: Local`; dadurch ist der externe Zugriff an den Node mit lokalem Gateway-Pod gebunden.
+- PostgreSQL-Zugangsdaten sind für das lokale Lab einfach gehalten.
+- Für produktionsnähere Setups wären External Secrets, Sealed Secrets oder Vault sinnvoll.
+- Für produktionsnähere Datenhaltung wären replizierter Storage und Backup/Restore wichtig.
 - In produktionsnahen Umgebungen würde man vor Gateway/Ingress typischerweise LoadBalancer, MetalLB, Cloud Load Balancer oder eine dedizierte Edge-Komponente verwenden.
 
 ---
@@ -1038,60 +1028,24 @@ Gateway
 HTTPRoute
 NGINX Gateway Fabric
 externalTrafficPolicy Local
+PersistentVolume
+PersistentVolumeClaim
+PostgreSQL auf Kubernetes
+Private Container Registry / GHCR
+ImagePullSecret
+FastAPI auf Kubernetes
+Kubernetes CronJob
+Metabase Dashboard
+Data Ingestion
+Data Platform Verification
 Cluster Verification
-```
-
----
-
-## Nächste Lernschritte
-
-### Kurzfristig
-
-```text
-README und Architektur weiter pflegen
-Rollenstruktur weiter verfeinern
-Helm Values aus Playbooks in values-Dateien auslagern
-Manifeste perspektivisch für GitOps vorbereiten
-Verify-Playbook weiter verbessern
-```
-
-### Kubernetes Networking
-
-```text
-Ingress besser verstehen
-TLS sauberer mit lokaler CA umsetzen
-cert-manager Issuer/ClusterIssuer vertiefen
-Network Policies lernen
-```
-
-### Moderne Kubernetes APIs
-
-```text
-Gateway API weiter vertiefen
-HTTPRoute Features testen
-Gateway API mit TLS erweitern
-Vergleich Ingress vs Gateway API dokumentieren
-```
-
-### Plattform-Erweiterungen
-
-```text
-Prometheus und Grafana
-Loki Logging
-OpenTelemetry Collector
-Argo CD GitOps
-Container Registry Integration
-CI/CD Pipeline für App-Deployments
-RBAC
-Secrets Management
-Backup/Restore mit Velero
 ```
 
 ---
 
 ## Projektziel
 
-Das Ziel dieses Labs ist es, eine realistische Kubernetes-Lernumgebung aufzubauen, die typische DevOps- und Platform-Engineering-Themen abdeckt.
+Das Ziel dieses Labs ist es, eine realistische Kubernetes-Lernumgebung aufzubauen, die typische DevOps-, Platform-Engineering- und Data-Platform-Themen abdeckt.
 
 Der Fokus liegt nicht nur auf Installation, sondern auf einem nachvollziehbaren Betriebsmodell:
 
@@ -1101,8 +1055,83 @@ Cluster reproduzierbar aufbauen
 Worker Nodes verwalten
 Workloads deployen
 Ingress, TLS und Gateway API betreiben
-Cluster-Zustand verifizieren
+Data Platform betreiben
+Daten automatisch erzeugen
+Daten über API aufnehmen
+Daten persistent speichern
+Daten über Dashboard sichtbar machen
+Cluster- und Plattformzustand verifizieren
 Änderungen versionieren
 ```
 
-Dieses Projekt eignet sich als Grundlage für weitere Themen wie GitOps, Observability, CI/CD, Security und Gateway API.
+Dieses Projekt eignet sich als Grundlage für weitere Themen wie GitOps, Observability, CI/CD, Security, Lakehouse, Data Processing und MLOps.
+
+---
+
+## Nächste Lernschritte
+
+### Kurzfristig
+
+```text
+README und Architekturdiagramme aktualisieren
+Screenshots vom Metabase Dashboard dokumentieren
+Verify-Playbook weiter strukturieren
+Data Platform Rolle weiter aufräumen
+Manifeste perspektivisch in Helm Chart überführen
+```
+
+### Data Platform / Lakehouse Foundation
+
+```text
+MinIO als S3-kompatibler Object Storage
+Raw Zone für rohe Events
+Processed Zone für transformierte Daten
+Curated Zone für aggregierte Daten
+Data Processing Job
+Service Health Summary Tabelle
+```
+
+### MLOps Foundation
+
+```text
+MLflow Tracking Server
+PostgreSQL als MLflow Backend Store
+MinIO als MLflow Artifact Store
+Training Job für Service Risk Prediction
+Model Metrics und Experimente dokumentieren
+```
+
+### GitOps
+
+```text
+Argo CD installieren
+Data Platform über GitOps verwalten
+App-of-Apps Struktur
+Automatischer Sync aus Git
+```
+
+### Observability
+
+```text
+Prometheus und Grafana
+kube-state-metrics
+CronJob Monitoring
+Data API Metriken
+PostgreSQL Monitoring
+Gateway/Ingress Monitoring
+Optional Loki Logging
+Optional OpenTelemetry Collector
+```
+
+### Security und Betrieb
+
+```text
+RBAC
+Network Policies
+Secrets Management
+Backup/Restore mit Velero
+Storage mit Longhorn/OpenEBS
+TLS für Gateway API
+Image Scanning
+CI/CD Pipeline für Container Images
+```
