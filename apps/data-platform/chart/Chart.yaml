@@ -1,0 +1,6 @@
+apiVersion: v2
+name: data-platform
+description: Data Platform for Kubernetes Lab with FastAPI, PostgreSQL, MinIO, Metabase and Processing Jobs
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

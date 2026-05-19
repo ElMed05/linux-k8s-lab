@@ -1,0 +1,126 @@
+namespace: data-platform
+
+imagePullSecrets:
+  - name: ghcr-secret
+
+gateway:
+  name: demo-gateway
+  namespace: nginx-gateway
+  nodePortHost: 192.168.0.173
+  nodePort: 31977
+  hosts:
+    api: api.data.local
+    dashboard: dashboard.data.local
+    minio: minio.data.local
+
+postgres:
+  serviceName: postgres
+  port: 5432
+  secretName: postgres-secret
+  existingPvc: postgres-data
+
+dataApi:
+  enabled: true
+  name: data-api
+  replicas: 1
+  image:
+    repository: ghcr.io/elmed05/data-platform-api
+    tag: "0.2.1"
+    pullPolicy: IfNotPresent
+  service:
+    port: 8000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  minio:
+    endpoint: minio-api:9000
+    rawBucket: raw
+    secure: "false"
+
+dataGenerator:
+  enabled: true
+  name: data-generator
+  schedule: "*/2 * * * *"
+  image:
+    repository: ghcr.io/elmed05/data-generator
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  apiUrl: "http://data-api:8000"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+dataProcessing:
+  enabled: true
+  name: data-processing
+  schedule: "*/5 * * * *"
+  image:
+    repository: ghcr.io/elmed05/data-processing-job
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  minio:
+    endpoint: minio-api:9000
+    processedBucket: processed
+    secure: "false"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+metabase:
+  enabled: true
+  name: metabase
+  replicas: 1
+  image:
+    repository: metabase/metabase
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    port: 3000
+  dbName: metabase
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+minio:
+  enabled: true
+  name: minio
+  image:
+    repository: minio/minio
+    tag: "RELEASE.2025-04-22T22-12-26Z"
+    pullPolicy: IfNotPresent
+  secretName: minio-secret
+  apiService:
+    name: minio-api
+    port: 9000
+  consoleService:
+    name: minio-console
+    port: 9001
+  storage:
+    pvcName: minio-data
+    storageClassName: minio-local-storage
+    size: 5Gi
+  nodeSelector:
+    kubernetes.io/hostname: k8s-worker-01
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi

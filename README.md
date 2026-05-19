@@ -1034,6 +1034,36 @@ kubectl run mc-check-processed -n data-platform --rm -i --restart=Never --image=
 
 ---
 
+---
+
+## Helm Chart
+
+Die Data Platform wurde zusätzlich als Helm Chart vorbereitet.
+
+Das Chart rendert die Kubernetes-Ressourcen für:
+
+- data-api
+- data-generator CronJob
+- data-processing CronJob
+- metabase
+- minio
+- Services
+- HTTPRoutes
+
+Secrets, Namespace sowie persistente Storage-Ressourcen bleiben aktuell bewusst unter Ansible-Kontrolle.
+
+Prüfung:
+
+```bash
+helm lint apps/data-platform/chart
+helm template data-platform apps/data-platform/chart > /tmp/data-platform-rendered.yaml
+kubectl apply --dry-run=server -f /tmp/data-platform-rendered.yaml
+```
+
+---
+
+
+
 ## Aktueller Lernstand
 
 Mit diesem Lab wurden bisher folgende Themen praktisch umgesetzt:

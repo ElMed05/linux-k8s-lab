@@ -1,0 +1,29 @@
+{{- if .Values.minio.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.minio.apiService.name }}
+  namespace: {{ .Values.namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Values.minio.name }}
+  ports:
+    - name: api
+      port: {{ .Values.minio.apiService.port }}
+      targetPort: {{ .Values.minio.apiService.port }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.minio.consoleService.name }}
+  namespace: {{ .Values.namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Values.minio.name }}
+  ports:
+    - name: console
+      port: {{ .Values.minio.consoleService.port }}
+      targetPort: {{ .Values.minio.consoleService.port }}
+{{- end }}

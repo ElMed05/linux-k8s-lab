@@ -1,0 +1,15 @@
+{{- if .Values.dataApi.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.dataApi.name }}
+  namespace: {{ .Values.namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Values.dataApi.name }}
+  ports:
+    - name: http
+      port: {{ .Values.dataApi.service.port }}
+      targetPort: {{ .Values.dataApi.service.port }}
+{{- end }}

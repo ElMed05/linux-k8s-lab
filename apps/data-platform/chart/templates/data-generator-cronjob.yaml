@@ -1,0 +1,31 @@
+{{- if .Values.dataGenerator.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Values.dataGenerator.name }}
+  namespace: {{ .Values.namespace }}
+spec:
+  schedule: "{{ .Values.dataGenerator.schedule }}"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: {{ .Values.dataGenerator.name }}
+        spec:
+          restartPolicy: OnFailure
+          imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 12 }}
+          containers:
+            - name: {{ .Values.dataGenerator.name }}
+              image: "{{ .Values.dataGenerator.image.repository }}:{{ .Values.dataGenerator.image.tag }}"
+              imagePullPolicy: {{ .Values.dataGenerator.image.pullPolicy }}
+              env:
+                - name: DATA_API_URL
+                  value: {{ .Values.dataGenerator.apiUrl }}
+              resources:
+{{ toYaml .Values.dataGenerator.resources | indent 16 }}
+{{- end }}

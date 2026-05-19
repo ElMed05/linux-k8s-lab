@@ -1,0 +1,60 @@
+{{- if .Values.metabase.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.metabase.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ .Values.metabase.name }}
+spec:
+  replicas: {{ .Values.metabase.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.metabase.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.metabase.name }}
+    spec:
+      containers:
+        - name: {{ .Values.metabase.name }}
+          image: "{{ .Values.metabase.image.repository }}:{{ .Values.metabase.image.tag }}"
+          imagePullPolicy: {{ .Values.metabase.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.metabase.service.port }}
+          env:
+            - name: MB_DB_TYPE
+              value: postgres
+            - name: MB_DB_HOST
+              value: {{ .Values.postgres.serviceName }}
+            - name: MB_DB_PORT
+              value: "{{ .Values.postgres.port }}"
+            - name: MB_DB_DBNAME
+              value: {{ .Values.metabase.dbName }}
+            - name: MB_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: POSTGRES_USER
+            - name: MB_DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: POSTGRES_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.metabase.service.port }}
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.metabase.service.port }}
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+{{ toYaml .Values.metabase.resources | indent 12 }}
+{{- end }}

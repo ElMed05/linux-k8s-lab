@@ -1,0 +1,79 @@
+{{- if .Values.dataApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.dataApi.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ .Values.dataApi.name }}
+spec:
+  replicas: {{ .Values.dataApi.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.dataApi.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.dataApi.name }}
+    spec:
+      imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 8 }}
+      containers:
+        - name: {{ .Values.dataApi.name }}
+          image: "{{ .Values.dataApi.image.repository }}:{{ .Values.dataApi.image.tag }}"
+          imagePullPolicy: {{ .Values.dataApi.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.dataApi.service.port }}
+          env:
+            - name: DB_HOST
+              value: {{ .Values.postgres.serviceName }}
+            - name: DB_PORT
+              value: "{{ .Values.postgres.port }}"
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: POSTGRES_DB
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: POSTGRES_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: POSTGRES_PASSWORD
+            - name: MINIO_ENDPOINT
+              value: {{ .Values.dataApi.minio.endpoint }}
+            - name: MINIO_RAW_BUCKET
+              value: {{ .Values.dataApi.minio.rawBucket }}
+            - name: MINIO_SECURE
+              value: "{{ .Values.dataApi.minio.secure }}"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.secretName }}
+                  key: MINIO_ROOT_USER
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.secretName }}
+                  key: MINIO_ROOT_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.dataApi.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.dataApi.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+{{ toYaml .Values.dataApi.resources | indent 12 }}
+{{- end }}

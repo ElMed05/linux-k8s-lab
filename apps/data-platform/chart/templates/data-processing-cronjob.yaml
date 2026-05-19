@@ -1,0 +1,64 @@
+{{- if .Values.dataProcessing.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Values.dataProcessing.name }}
+  namespace: {{ .Values.namespace }}
+spec:
+  schedule: "{{ .Values.dataProcessing.schedule }}"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: {{ .Values.dataProcessing.name }}
+        spec:
+          restartPolicy: OnFailure
+          imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 12 }}
+          containers:
+            - name: {{ .Values.dataProcessing.name }}
+              image: "{{ .Values.dataProcessing.image.repository }}:{{ .Values.dataProcessing.image.tag }}"
+              imagePullPolicy: {{ .Values.dataProcessing.image.pullPolicy }}
+              env:
+                - name: DB_HOST
+                  value: {{ .Values.postgres.serviceName }}
+                - name: DB_PORT
+                  value: "{{ .Values.postgres.port }}"
+                - name: DB_NAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.postgres.secretName }}
+                      key: POSTGRES_DB
+                - name: DB_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.postgres.secretName }}
+                      key: POSTGRES_USER
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.postgres.secretName }}
+                      key: POSTGRES_PASSWORD
+                - name: MINIO_ENDPOINT
+                  value: {{ .Values.dataProcessing.minio.endpoint }}
+                - name: MINIO_PROCESSED_BUCKET
+                  value: {{ .Values.dataProcessing.minio.processedBucket }}
+                - name: MINIO_SECURE
+                  value: "{{ .Values.dataProcessing.minio.secure }}"
+                - name: MINIO_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.minio.secretName }}
+                      key: MINIO_ROOT_USER
+                - name: MINIO_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.minio.secretName }}
+                      key: MINIO_ROOT_PASSWORD
+              resources:
+{{ toYaml .Values.dataProcessing.resources | indent 16 }}
+{{- end }}
