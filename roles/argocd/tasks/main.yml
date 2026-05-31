@@ -1,0 +1,118 @@
+---
+- name: Create Argo CD namespace manifest
+  ansible.builtin.command: >
+    kubectl create namespace argocd
+    --dry-run=client
+    -o yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: argocd_namespace_manifest
+  changed_when: false
+
+- name: Apply Argo CD namespace
+  ansible.builtin.command: kubectl apply -f -
+  args:
+    stdin: "{{ argocd_namespace_manifest.stdout }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_argocd_namespace
+  changed_when: >
+    'created' in apply_argocd_namespace.stdout or
+    'configured' in apply_argocd_namespace.stdout
+
+- name: Install Argo CD manifests
+  ansible.builtin.command: >
+    kubectl apply -n argocd
+    --server-side
+    --force-conflicts
+    -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: install_argocd
+  changed_when: >
+    'created' in install_argocd.stdout or
+    'configured' in install_argocd.stdout
+
+- name: Wait for Argo CD server rollout
+  ansible.builtin.command: >
+    kubectl rollout status deployment/argocd-server
+    -n argocd
+    --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Wait for Argo CD repo server rollout
+  ansible.builtin.command: >
+    kubectl rollout status deployment/argocd-repo-server
+    -n argocd
+    --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Wait for Argo CD redis rollout
+  ansible.builtin.command: >
+    kubectl rollout status deployment/argocd-redis
+    -n argocd
+    --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Wait for Argo CD dex rollout
+  ansible.builtin.command: >
+    kubectl rollout status deployment/argocd-dex-server
+    -n argocd
+    --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  failed_when: false
+
+- name: Copy Argo CD HTTPRoute manifest
+  ansible.builtin.copy:
+    src: argocd-httproute.yaml
+    dest: /tmp/argocd-httproute.yaml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Check Argo CD HTTPRoute diff
+  ansible.builtin.command: >
+    kubectl diff -f /tmp/argocd-httproute.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: argocd_httproute_diff
+  changed_when: false
+  failed_when: argocd_httproute_diff.rc not in [0, 1]
+
+- name: Apply Argo CD HTTPRoute
+  ansible.builtin.command: >
+    kubectl apply -f /tmp/argocd-httproute.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: apply_argocd_httproute
+  changed_when: argocd_httproute_diff.rc == 1
+  when: argocd_httproute_diff.rc == 1
+
+- name: Wait for Argo CD application controller statefulset
+  ansible.builtin.command: >
+    kubectl rollout status statefulset/argocd-application-controller
+    -n argocd
+    --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Show Argo CD resources
+  ansible.builtin.command: kubectl get pods,svc -n argocd
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: argocd_resources
+  changed_when: false
+
+- name: Print Argo CD status
+  ansible.builtin.debug:
+    msg:
+      - "{{ argocd_resources.stdout_lines }}"

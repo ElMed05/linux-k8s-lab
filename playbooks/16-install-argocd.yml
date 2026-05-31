@@ -1,0 +1,8 @@
+---
+- name: Install Argo CD
+  hosts: k8s_control_plane
+  become: true
+  gather_facts: false
+
+  roles:
+    - argocd

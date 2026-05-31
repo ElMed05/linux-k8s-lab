@@ -15,8 +15,13 @@
       register: kubelet_status
       changed_when: false
 
+    - name: Check Helm version
+      ansible.builtin.command: helm version --short
+      register: helm_version
+      changed_when: false
+
     - name: Get Kubernetes nodes
-      ansible.builtin.command: kubectl get nodes
+      ansible.builtin.command: kubectl get nodes -o wide
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       register: kubectl_nodes
@@ -27,11 +32,6 @@
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       register: kubectl_pods
-      changed_when: false
-    
-    - name: Check Helm version
-      ansible.builtin.command: helm version --short
-      register: helm_version
       changed_when: false
 
     - name: Get ingress-nginx controller status
@@ -54,7 +54,7 @@
         KUBECONFIG: /etc/kubernetes/admin.conf
       register: demo_ingress
       changed_when: false
-    
+
     - name: Get cert-manager pods
       ansible.builtin.command: kubectl get pods -n cert-manager -o wide
       environment:
@@ -111,12 +111,13 @@
       register: gateway_status
       changed_when: false
 
-    - name: Get HTTPRoute status
+    - name: Get demo HTTPRoute status
       ansible.builtin.command: kubectl get httproute -n demo
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       register: httproute_status
       changed_when: false
+
     - name: Get data platform pods
       ansible.builtin.command: kubectl get pods -n data-platform -o wide
       environment:
@@ -138,7 +139,7 @@
       register: data_platform_pvcs
       changed_when: false
 
-    - name: Get data generator CronJob
+    - name: Get data platform CronJobs
       ansible.builtin.command: kubectl get cronjob -n data-platform
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
@@ -161,16 +162,27 @@
 
     - name: Check Data API health through Gateway API
       ansible.builtin.command: >
-        curl -s -H "Host: api.data.local"
-        http://192.168.0.173:31977/health
+        curl -fsS -H "Host: {{ data_platform_hosts.api }}"
+        http://{{ gateway_node_ip }}:{{ gateway_nodeport }}/health
       register: data_api_gateway_health
       changed_when: false
 
+    - name: Print Data API Gateway health
+      ansible.builtin.debug:
+        msg: "{{ data_api_gateway_health.stdout }}"
+
     - name: Check Metabase endpoint through Gateway API
       ansible.builtin.command: >
-        curl -I -s -H "Host: dashboard.data.local"
-        http://192.168.0.173:31977
+        curl -sI -H "Host: {{ data_platform_hosts.dashboard }}"
+        http://{{ gateway_node_ip }}:{{ gateway_nodeport }}
       register: metabase_gateway_health
+      changed_when: false
+
+    - name: Check MinIO console through Gateway API
+      ansible.builtin.command: >
+        curl -sI -H "Host: {{ data_platform_hosts.minio }}"
+        http://{{ gateway_node_ip }}:{{ gateway_nodeport }}
+      register: minio_gateway_health
       changed_when: false
 
     - name: Check data platform database tables
@@ -201,13 +213,6 @@
       environment:
         KUBECONFIG: /etc/kubernetes/admin.conf
       register: incidents_count
-      changed_when: false
-
-    - name: Check MinIO console through Gateway API
-      ansible.builtin.command: >
-        curl -I -s -H "Host: minio.data.local"
-        http://192.168.0.173:31977
-      register: minio_gateway_health
       changed_when: false
 
     - name: Check MinIO buckets
@@ -336,10 +341,10 @@
           - "{{ all_httproutes.stdout_lines }}"
           - "Data API Gateway Health: {{ data_api_gateway_health.stdout }}"
           - "{{ metabase_gateway_health.stdout_lines }}"
+          - "{{ minio_gateway_health.stdout_lines }}"
           - "{{ data_platform_tables.stdout_lines }}"
           - "service_metrics count: {{ service_metrics_count.stdout | trim }}"
           - "incidents count: {{ incidents_count.stdout | trim }}"
-          - "{{ minio_gateway_health.stdout_lines }}"
           - "{{ minio_buckets.stdout_lines }}"
           - "MinIO raw metrics sample:"
           - "{{ minio_raw_metrics.stdout_lines }}"
