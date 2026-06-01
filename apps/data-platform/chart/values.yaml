@@ -6,7 +6,7 @@ imagePullSecrets:
 gateway:
   name: demo-gateway
   namespace: nginx-gateway
-  nodePortHost: 192.168.0.173
+  nodePortHost: 192.168.1.16
   nodePort: 31977
   hosts:
     api: api.data.local
