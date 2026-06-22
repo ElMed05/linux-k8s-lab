@@ -251,7 +251,7 @@ dashboard.data.local:31977
 Wichtig: Der Gateway-Service nutzt aktuell `externalTrafficPolicy: Local`. Deshalb funktioniert der NodePort-Zugriff über den Worker-Node, auf dem der Gateway-Pod läuft:
 
 ```text
-k8s-worker-01 / 192.168.1.16
+k8s-worker-01 / 192.168.0.173
 ```
 
 ---
@@ -301,8 +301,8 @@ k8s-worker-01 / 192.168.1.16
 
 | Hostname | Rolle | IP | Betriebssystem | Runtime |
 |---|---|---|---|---|
-| `k8s-master-01` | Control Plane | `192.168.1.15` | Ubuntu Server 24.04 LTS | containerd |
-| `k8s-worker-01` | Worker Node | `192.168.1.16` | Ubuntu Server 24.04 LTS | containerd |
+| `k8s-master-01` | Control Plane | `192.168.0.202` | Ubuntu Server 24.04 LTS | containerd |
+| `k8s-worker-01` | Worker Node | `192.168.0.173` | Ubuntu Server 24.04 LTS | containerd |
 
 ---
 
@@ -490,10 +490,10 @@ Beispiel:
 
 ```ini
 [k8s_control_plane]
-k8s-master-01 ansible_host=192.168.1.15 ansible_user=devops ansible_python_interpreter=/usr/bin/python3
+k8s-master-01 ansible_host=192.168.0.202 ansible_user=devops ansible_python_interpreter=/usr/bin/python3
 
 [k8s_workers]
-k8s-worker-01 ansible_host=192.168.1.16 ansible_user=devops ansible_python_interpreter=/usr/bin/python3
+k8s-worker-01 ansible_host=192.168.0.173 ansible_user=devops ansible_python_interpreter=/usr/bin/python3
 
 [k8s_cluster:children]
 k8s_control_plane
@@ -678,21 +678,21 @@ unreachable=0
 ### HTTP über Ingress
 
 ```bash
-curl -H "Host: demo.local" http://192.168.1.15:30520
-curl -H "Host: demo.local" http://192.168.1.16:30520
+curl -H "Host: demo.local" http://192.168.0.202:30520
+curl -H "Host: demo.local" http://192.168.0.173:30520
 ```
 
 ### HTTPS über Ingress
 
 ```bash
 curl -k https://demo.local:32685
-curl -k --resolve demo.local:32685:192.168.1.15 https://demo.local:32685
+curl -k --resolve demo.local:32685:192.168.0.202 https://demo.local:32685
 ```
 
 ### HTTP über Gateway API
 
 ```bash
-curl -H "Host: gateway.demo.local" http://192.168.1.16:31977
+curl -H "Host: gateway.demo.local" http://192.168.0.173:31977
 ```
 
 ---
@@ -702,7 +702,7 @@ curl -H "Host: gateway.demo.local" http://192.168.1.16:31977
 ### Data API
 
 ```bash
-curl -H "Host: api.data.local" http://192.168.1.16:31977/health
+curl -H "Host: api.data.local" http://192.168.0.173:31977/health
 ```
 
 Erwartung:
@@ -753,10 +753,10 @@ C:\Windows\System32\drivers\etc\hosts
 Einträge:
 
 ```text
-192.168.1.15 demo.local
-192.168.1.16 gateway.demo.local
-192.168.1.16 api.data.local
-192.168.1.16 dashboard.data.local
+192.168.0.202 demo.local
+192.168.0.173 gateway.demo.local
+192.168.0.173 api.data.local
+192.168.0.173 dashboard.data.local
 ```
 
 Danach im Browser:

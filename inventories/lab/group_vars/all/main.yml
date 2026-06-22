@@ -22,8 +22,8 @@ pod_network_cidr: "10.244.0.0/16"
 kubernetes_admin_user: "devops"
 cert_manager_version: "v1.20.2"
 
-k8s_control_plane_ip: "192.168.1.15"
-k8s_worker_ip: "192.168.1.16"
+k8s_control_plane_ip: "192.168.0.202"
+k8s_worker_ip: "192.168.0.173"
 
 k8s_api_endpoint: "{{ k8s_control_plane_ip }}"
 gateway_node_ip: "{{ k8s_worker_ip }}"
